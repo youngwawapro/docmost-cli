@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git remote add docmost-cli https://github.com/dapi/docmost-cli.git && git push docmost-cli main)"
+    ]
+  }
+}
