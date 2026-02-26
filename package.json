@@ -1,10 +1,10 @@
 {
-  "name": "docmost-mcp",
+  "name": "docmost-cli",
   "version": "1.2.0",
-  "description": "A Model Context Protocol (MCP) server for Docmost, allowing AI agents to manage documentation spaces and pages.",
+  "description": "A CLI for Docmost, allowing automation and documentation management from the terminal.",
   "main": "build/index.js",
   "bin": {
-    "docmost-mcp": "build/index.js"
+    "docmost": "build/index.js"
   },
   "files": [
     "build"
@@ -14,11 +14,10 @@
     "prepare": "tsc",
     "prepublishOnly": "tsc",
     "start": "node build/index.js",
-    "watch": "tsc --watch",
-    "inspector": "npx @modelcontextprotocol/inspector --config mcp_config.json"
+    "watch": "tsc --watch"
   },
   "keywords": [
-    "mcp",
+    "cli",
     "docmost",
     "documentation",
     "ai",
@@ -30,7 +29,6 @@
   "dependencies": {
     "@hocuspocus/provider": "^3.4.4",
     "@hocuspocus/transformer": "^3.4.4",
-    "@modelcontextprotocol/sdk": "^1.25.3",
     "@tiptap/core": "^3.18.0",
     "@tiptap/extension-image": "^3.18.0",
     "@tiptap/extension-link": "^3.18.0",
@@ -38,12 +36,12 @@
     "@tiptap/starter-kit": "^3.18.0",
     "@types/jsdom": "^27.0.0",
     "axios": "^1.6.0",
+    "commander": "^14.0.1",
     "form-data": "^4.0.0",
     "jsdom": "^27.4.0",
     "marked": "^17.0.1",
     "ws": "^8.19.0",
-    "yjs": "^13.6.29",
-    "zod": "^3.22.0"
+    "yjs": "^13.6.29"
   },
   "devDependencies": {
     "@types/form-data": "^2.5.0",
