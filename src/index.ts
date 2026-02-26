@@ -199,18 +199,41 @@ function printResult(
   }
 }
 
+function ensureOutputSupported(
+  output: OutputFormat,
+  options: { allowTable?: boolean; allowText?: boolean } = {},
+) {
+  if (output === "table" && !options.allowTable) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "Output format 'table' is not supported for this command.",
+    );
+  }
+
+  if (output === "text" && !options.allowText) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "Output format 'text' is not supported for this command.",
+    );
+  }
+}
+
+function isCommanderHelpExit(error: unknown): boolean {
+  return (
+    error instanceof CommanderError &&
+    (error.code === "commander.helpDisplayed" ||
+      error.code === "commander.help" ||
+      error.code === "commander.version" ||
+      error.message === "(outputHelp)")
+  );
+}
+
 function normalizeError(error: unknown): CliError {
   if (error instanceof CliError) {
     return error;
   }
 
   if (error instanceof CommanderError) {
-    if (
-      error.code === "commander.helpDisplayed" ||
-      error.code === "commander.version"
-    ) {
-      process.exit(0);
-    }
     return new CliError("VALIDATION_ERROR", error.message);
   }
 
@@ -340,6 +363,7 @@ function registerCommands(program: Command) {
     .description("Get the current Docmost workspace")
     .action(() =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.getWorkspace();
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -350,6 +374,7 @@ function registerCommands(program: Command) {
     .description("List all available spaces")
     .action(() =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.getSpaces();
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -360,6 +385,7 @@ function registerCommands(program: Command) {
     .description("List all available groups")
     .action(() =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.getGroups();
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -371,6 +397,7 @@ function registerCommands(program: Command) {
     .option("-s, --space-id <id>", "Filter by space ID")
     .action((options: { spaceId?: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.listPages(options.spaceId);
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -382,6 +409,7 @@ function registerCommands(program: Command) {
     .requiredOption("--page-id <id>", "Page ID")
     .action((options: { pageId: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true, allowText: true });
         const result = await client.getPage(options.pageId);
         printResult(result, opts.output, {
           allowTable: true,
@@ -408,6 +436,7 @@ function registerCommands(program: Command) {
         parentPageId?: string;
       }) =>
         withClient(program, async (client, opts) => {
+          ensureOutputSupported(opts.output);
           const content = await resolveContentInput(options.content);
           const result = await client.createPage(
             options.title,
@@ -427,6 +456,7 @@ function registerCommands(program: Command) {
     .option("--title <title>", "New page title")
     .action((options: { pageId: string; content: string; title?: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
         const content = await resolveContentInput(options.content);
         const result = await client.updatePage(options.pageId, content, options.title);
         printResult(result, opts.output);
@@ -448,6 +478,7 @@ function registerCommands(program: Command) {
         root?: boolean;
       }) =>
         withClient(program, async (client, opts) => {
+          ensureOutputSupported(opts.output);
           if (options.root && options.parentPageId) {
             throw new CliError(
               "VALIDATION_ERROR",
@@ -472,6 +503,7 @@ function registerCommands(program: Command) {
     .option("--permanent", "Permanently delete page (no trash)")
     .action((options: { pageId: string; permanent?: boolean }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
         const result = await client.deletePage(options.pageId, options.permanent);
         printResult(result, opts.output);
       }),
@@ -483,6 +515,7 @@ function registerCommands(program: Command) {
     .requiredOption("--page-ids <id1,id2,...>", "Comma-separated page IDs")
     .action((options: { pageIds: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const pageIds = parsePageIds(options.pageIds);
         const result = await client.deletePages(pageIds);
         printResult(result, opts.output, { allowTable: true });
@@ -496,6 +529,7 @@ function registerCommands(program: Command) {
     .option("-s, --space-id <id>", "Filter by space ID")
     .action((query: string, options: { spaceId?: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.search(query, options.spaceId);
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -508,6 +542,7 @@ function registerCommands(program: Command) {
     .option("--cursor <cursor>", "Pagination cursor")
     .action((options: { pageId: string; cursor?: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.getPageHistory(options.pageId, options.cursor);
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -519,6 +554,7 @@ function registerCommands(program: Command) {
     .requiredOption("--history-id <id>", "History entry ID")
     .action((options: { historyId: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true, allowText: true });
         const result = await client.getPageHistoryDetail(options.historyId);
         printResult(result, opts.output, {
           allowTable: true,
@@ -536,6 +572,7 @@ function registerCommands(program: Command) {
     .requiredOption("--page-id <id>", "Page ID")
     .action((options: { pageId: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
         const result = await client.restorePage(options.pageId);
         printResult(result, opts.output);
       }),
@@ -547,6 +584,7 @@ function registerCommands(program: Command) {
     .requiredOption("--space-id <id>", "Space ID")
     .action((options: { spaceId: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.getTrash(options.spaceId);
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -559,6 +597,7 @@ function registerCommands(program: Command) {
     .option("--space-id <id>", "Target space ID")
     .action((options: { pageId: string; spaceId?: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
         const result = await client.duplicatePage(options.pageId, options.spaceId);
         printResult(result, opts.output);
       }),
@@ -570,6 +609,7 @@ function registerCommands(program: Command) {
     .requiredOption("--page-id <id>", "Page ID")
     .action((options: { pageId: string }) =>
       withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
         const result = await client.getPageBreadcrumbs(options.pageId);
         printResult(result, opts.output, { allowTable: true });
       }),
@@ -609,10 +649,7 @@ async function main() {
   try {
     await program.parseAsync(process.argv);
   } catch (error: unknown) {
-    if (
-      error instanceof CommanderError &&
-      (error.code === "commander.helpDisplayed" || error.code === "commander.version")
-    ) {
+    if (isCommanderHelpExit(error)) {
       process.exit(0);
     }
 
