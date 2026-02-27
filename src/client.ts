@@ -218,7 +218,7 @@ export class DocmostClient {
   async updatePage(pageId: string, content: string, title?: string) {
     await this.ensureAuthenticated();
 
-    if (title) {
+    if (title !== undefined) {
       await this.client.post("/pages/update", { pageId, title });
     }
 
@@ -232,6 +232,7 @@ export class DocmostClient {
       }
       throw new Error(
         `Failed to update page content: ${error.message}`,
+        { cause: error },
       );
     }
 

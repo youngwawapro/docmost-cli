@@ -37,9 +37,9 @@ const EXIT_CODES: Record<CliErrorCode, number> = {
 };
 
 class CliError extends Error {
-  code: CliErrorCode;
-  exitCode: number;
-  details?: unknown;
+  readonly code: CliErrorCode;
+  readonly exitCode: number;
+  readonly details?: unknown;
 
   constructor(code: CliErrorCode, message: string, details?: unknown) {
     super(message);
@@ -498,6 +498,12 @@ function registerCommands(program: Command) {
               "--root and --parent-page-id are mutually exclusive.",
             );
           }
+          if (!options.root && !options.parentPageId) {
+            throw new CliError(
+              "VALIDATION_ERROR",
+              "Specify --parent-page-id <id> or --root.",
+            );
+          }
 
           const parentPageId = options.root ? null : (options.parentPageId ?? null);
           const result = await client.movePage(
@@ -637,7 +643,7 @@ async function main() {
     .showHelpAfterError()
     .option("-u, --api-url <url>", "Docmost API URL")
     .option("-e, --email <email>", "Docmost account email")
-    .option("-p, --password <password>", "Docmost account password (prefer DOCMOST_PASSWORD env var)")
+    .option("--password <password>", "Docmost account password (prefer DOCMOST_PASSWORD env var)")
     .option("-t, --token <token>", "Docmost API auth token")
     .option("-o, --output <format>", "Output format: json | table | text", "json")
     .addHelpText(
@@ -646,7 +652,7 @@ async function main() {
         "",
         "Examples:",
         "  docmost --api-url http://localhost:3000/api --token <token> workspace",
-        "  docmost --api-url http://localhost:3000/api --email admin@example.com --password secret search \"onboarding\"",
+        "  DOCMOST_PASSWORD=secret docmost --api-url http://localhost:3000/api --email admin@example.com search \"onboarding\"",
         "  docmost list-pages --space-id <space-id> --output table",
         "  docmost get-page --page-id <page-id> --output text",
         "",
