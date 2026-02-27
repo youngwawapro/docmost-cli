@@ -1,718 +1,696 @@
 #!/usr/bin/env node
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import FormData from "form-data";
-import axios, { AxiosInstance } from "axios";
-import { z } from "zod";
-import {
-  filterWorkspace,
-  filterSpace,
-  filterGroup,
-  filterPage,
-  filterSearchResult,
-  filterHistoryEntry,
-  filterHistoryDetail,
-} from "./lib/filters.js";
-import { convertProseMirrorToMarkdown } from "./lib/markdown-converter.js";
 import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { updatePageContentRealtime } from "./lib/collaboration.js";
-import { getCollabToken, performLogin } from "./lib/auth-utils.js";
+import { readFile } from "fs/promises";
+import axios from "axios";
+import { Command, CommanderError } from "commander";
+import { DocmostClient, type ClientAuthOptions } from "./client.js";
 
-// Read version from package.json
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const packageJson = JSON.parse(
-  readFileSync(join(__dirname, "../package.json"), "utf-8"),
-);
-const VERSION = packageJson.version;
+type OutputFormat = "json" | "table" | "text";
 
-const API_URL = process.env.DOCMOST_API_URL;
-const EMAIL = process.env.DOCMOST_EMAIL;
-const PASSWORD = process.env.DOCMOST_PASSWORD;
+type GlobalOptions = {
+  apiUrl?: string;
+  email?: string;
+  password?: string;
+  token?: string;
+  output?: string;
+};
 
-if (!API_URL || !EMAIL || !PASSWORD) {
-  console.error(
-    "Error: DOCMOST_API_URL, DOCMOST_EMAIL, and DOCMOST_PASSWORD environment variables are required.",
+type ResolvedOptions = {
+  apiUrl: string;
+  output: OutputFormat;
+  auth: ClientAuthOptions;
+};
+
+type CliErrorCode =
+  | "AUTH_ERROR"
+  | "NOT_FOUND"
+  | "VALIDATION_ERROR"
+  | "NETWORK_ERROR"
+  | "INTERNAL_ERROR";
+
+const EXIT_CODES: Record<CliErrorCode, number> = {
+  AUTH_ERROR: 2,
+  NOT_FOUND: 3,
+  VALIDATION_ERROR: 4,
+  NETWORK_ERROR: 5,
+  INTERNAL_ERROR: 1,
+};
+
+class CliError extends Error {
+  readonly code: CliErrorCode;
+  readonly exitCode: number;
+  readonly details?: unknown;
+
+  constructor(code: CliErrorCode, message: string, details?: unknown) {
+    super(message);
+    this.code = code;
+    this.exitCode = EXIT_CODES[code];
+    this.details = details;
+  }
+}
+
+const pkg = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
+) as { version: string };
+
+
+function normalizeOutputFormat(value: string | undefined): OutputFormat {
+  const normalized = (value || "json").toLowerCase();
+  if (normalized === "json" || normalized === "table" || normalized === "text") {
+    return normalized;
+  }
+  throw new CliError(
+    "VALIDATION_ERROR",
+    `Unsupported output format '${value}'. Use json, table, or text.`,
   );
-  process.exit(1);
 }
 
-class DocmostClient {
-  // ... [Client Implementation stays exactly the same] ...
-  private client: AxiosInstance;
-  private token: string | null = null;
+function resolveOptions(raw: GlobalOptions): ResolvedOptions {
+  const apiUrl = raw.apiUrl || process.env.DOCMOST_API_URL;
+  const token = raw.token || process.env.DOCMOST_TOKEN;
+  const email = raw.email || process.env.DOCMOST_EMAIL;
+  const password = raw.password || process.env.DOCMOST_PASSWORD;
 
-  constructor(baseURL: string) {
-    this.client = axios.create({
-      baseURL,
-      headers: {
-        "Content-Type": "application/json",
-      },
-    });
+  if (!apiUrl) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "API URL is required. Use --api-url or DOCMOST_API_URL.",
+    );
   }
 
-  async login() {
-    if (!EMAIL || !PASSWORD) {
-      throw new Error("Missing Credentials (DOCMOST_EMAIL, DOCMOST_PASSWORD)");
+  if (!token && (!email || !password)) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "Authentication is required: provide --token (or DOCMOST_TOKEN) or both --email/--password (or DOCMOST_EMAIL/DOCMOST_PASSWORD).",
+    );
+  }
+
+  return {
+    apiUrl,
+    output: normalizeOutputFormat(raw.output),
+    auth: token ? { token } : { email: email!, password: password! },
+  };
+}
+
+function flattenForTable(row: unknown): Record<string, unknown> {
+  if (row === null || typeof row !== "object") {
+    return { value: row };
+  }
+
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      output[key] = value;
+      continue;
     }
-    // baseURL is already set in this.client
-    const baseURL = this.client.defaults.baseURL || "";
 
-    // Use shared auth utility
-    this.token = await performLogin(baseURL, EMAIL, PASSWORD);
-    this.client.defaults.headers.common["Authorization"] =
-      `Bearer ${this.token}`;
+    if (Array.isArray(value)) {
+      const allPrimitive = value.every(
+        (item) =>
+          item === null ||
+          typeof item === "string" ||
+          typeof item === "number" ||
+          typeof item === "boolean",
+      );
+      output[key] = allPrimitive ? value.join(", ") : JSON.stringify(value);
+      continue;
+    }
+
+    output[key] = JSON.stringify(value);
   }
 
-  async ensureAuthenticated() {
-    if (!this.token) {
-      await this.login();
+  return output;
+}
+
+function toTableRows(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) {
+    return data.map((row) => flattenForTable(row));
+  }
+
+  if (data && typeof data === "object") {
+    const value = data as Record<string, unknown>;
+    if (Array.isArray(value.items)) {
+      return value.items.map((row) => flattenForTable(row));
+    }
+    if (value.data && typeof value.data === "object") {
+      const inner = value.data as Record<string, unknown>;
+      if (Array.isArray(inner.items)) {
+        return inner.items.map((row) => flattenForTable(row));
+      }
     }
   }
 
-  /**
-   * Generic pagination handler for Docmost API endpoints
-   * @param endpoint - The API endpoint path (e.g., "/spaces", "/pages/recent")
-   * @param basePayload - Base payload object to send with each request
-   * @param limit - Items per page (min: 1, max: 100, default: 100)
-   * @returns All items collected from all pages
-   */
-  async paginateAll<T = any>(
-    endpoint: string,
-    basePayload: Record<string, any> = {},
-    limit: number = 100,
-  ): Promise<T[]> {
-    await this.ensureAuthenticated();
+  return [flattenForTable(data)];
+}
 
-    // Clamp limit between 1 and 100
-    const clampedLimit = Math.max(1, Math.min(100, limit));
+function printResult(
+  data: unknown,
+  output: OutputFormat,
+  options: {
+    allowTable?: boolean;
+    textExtractor?: (result: unknown) => string | undefined;
+  } = {},
+) {
+  if (output === "json") {
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
 
-    let page = 1;
-    let allItems: T[] = [];
-    let hasNextPage = true;
+  if (output === "table") {
+    if (!options.allowTable) {
+      throw new CliError(
+        "VALIDATION_ERROR",
+        "Output format 'table' is not supported for this command.",
+      );
+    }
 
-    while (hasNextPage) {
-      const response = await this.client.post(endpoint, {
-        ...basePayload,
-        limit: clampedLimit,
-        page,
+    const rows = toTableRows(data);
+    if (rows.length === 0) {
+      console.log("(empty)");
+      return;
+    }
+
+    console.table(rows);
+    return;
+  }
+
+  if (!options.textExtractor) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "Output format 'text' is not supported for this command.",
+    );
+  }
+
+  const text = options.textExtractor(data);
+  if (typeof text !== "string") {
+    throw new CliError("VALIDATION_ERROR", "No text content available.");
+  }
+
+  process.stdout.write(text);
+  if (!text.endsWith("\n")) {
+    process.stdout.write("\n");
+  }
+}
+
+function ensureOutputSupported(
+  output: OutputFormat,
+  options: { allowTable?: boolean; allowText?: boolean } = {},
+) {
+  if (output === "table" && !options.allowTable) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "Output format 'table' is not supported for this command.",
+    );
+  }
+
+  if (output === "text" && !options.allowText) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "Output format 'text' is not supported for this command.",
+    );
+  }
+}
+
+function isCommanderHelpExit(error: unknown): boolean {
+  return (
+    error instanceof CommanderError &&
+    (error.code === "commander.helpDisplayed" ||
+      error.code === "commander.help" ||
+      error.code === "commander.version" ||
+      error.message === "(outputHelp)")
+  );
+}
+
+function normalizeError(error: unknown): CliError {
+  if (error instanceof CliError) {
+    return error;
+  }
+
+  if (error instanceof CommanderError) {
+    return new CliError("VALIDATION_ERROR", error.message);
+  }
+
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status;
+    const responseData = error.response?.data;
+    const message =
+      (typeof responseData?.message === "string" && responseData.message) ||
+      error.message ||
+      "Request failed";
+
+    if (status === 401 || status === 403) {
+      return new CliError("AUTH_ERROR", message, responseData);
+    }
+    if (status === 404) {
+      return new CliError("NOT_FOUND", message, responseData);
+    }
+    if (status === 400 || status === 422) {
+      return new CliError("VALIDATION_ERROR", message, responseData);
+    }
+
+    if (!status) {
+      return new CliError("NETWORK_ERROR", message, {
+        code: error.code,
       });
-
-      const data = response.data;
-
-      // Handle both direct data.items and data.data.items structures
-      const items = data.data?.items || data.items || [];
-      const meta = data.data?.meta || data.meta;
-
-      allItems = allItems.concat(items);
-      hasNextPage = meta?.hasNextPage || false;
-      page++;
     }
 
-    return allItems;
+    return new CliError("INTERNAL_ERROR", message, responseData);
   }
 
-  async getWorkspace() {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/workspace/info", {});
-    return {
-      data: filterWorkspace(response.data.data),
-      success: response.data.success,
-    };
+  if (error instanceof Error) {
+    return new CliError("INTERNAL_ERROR", error.message);
   }
 
-  async getSpaces() {
-    const spaces = await this.paginateAll("/spaces", {});
-    return spaces.map((space) => filterSpace(space));
-  }
-
-  async getGroups() {
-    const groups = await this.paginateAll("/groups", {});
-    return groups.map((group) => filterGroup(group));
-  }
-
-  async listPages(spaceId?: string) {
-    const payload = spaceId ? { spaceId } : {};
-    const pages = await this.paginateAll("/pages/recent", payload);
-    return pages.map((page) => filterPage(page));
-  }
-
-  async listSidebarPages(spaceId: string, pageId: string) {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/pages/sidebar-pages", {
-      spaceId,
-      pageId,
-      page: 1,
-    });
-    return response.data?.data?.items || [];
-  }
-
-  async getPage(pageId: string) {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/pages/info", { pageId });
-    const resultData = response.data.data; // Assuming data is nested under 'data'
-
-    let content = resultData.content
-      ? convertProseMirrorToMarkdown(resultData.content)
-      : ""; // Default to empty string
-
-    // Always fetch subpages to provide context to the agent
-    let subpages: any[] = [];
-
-    try {
-      subpages = await this.listSidebarPages(resultData.spaceId, pageId);
-    } catch (e: any) {
-      console.warn("Failed to fetch subpages:", e);
-    }
-
-    // Resolve subpages if the placeholder exists
-    if (content && content.includes("{{SUBPAGES}}")) {
-      if (subpages && subpages.length > 0) {
-        const list = subpages
-          .map((p: any) => `- [${p.title}](page:${p.id})`)
-          .join("\n");
-        content = content.replace("{{SUBPAGES}}", `### Subpages\n${list}`);
-      } else {
-        content = content.replace("{{SUBPAGES}}", "");
-      }
-    }
-
-    return {
-      data: filterPage(resultData, content, subpages),
-      success: response.data.success,
-    };
-  }
-
-  /**
-   * Create a new page with title and content.
-   *
-   * Note: As long as Docmost doesn't provide a /pages/create endpoint that allows
-   * setting content directly, we must use the /pages/import workaround to create
-   * pages with initial content. This method:
-   * 1. Creates the page via /pages/import (which supports content)
-   * 2. Moves it to the correct parent if specified
-   */
-  async createPage(
-    title: string,
-    content: string,
-    spaceId: string,
-    parentPageId?: string,
-  ) {
-    await this.ensureAuthenticated();
-
-    if (parentPageId) {
-      try {
-        await this.getPage(parentPageId);
-      } catch (e) {
-        throw new Error(`Parent page with ID ${parentPageId} not found.`);
-      }
-    }
-
-    // 1. Create content via Import (using multipart/form-data)
-    const form = new FormData();
-    form.append("spaceId", spaceId);
-
-    const fileContent = Buffer.from(content, "utf-8");
-    form.append("file", fileContent, {
-      filename: `${title || "import"}.md`,
-      contentType: "text/markdown",
-    });
-
-    const headers = {
-      ...form.getHeaders(),
-      Authorization: `Bearer ${this.token}`,
-    };
-
-    // Use raw axios call for FormData handling
-    const response = await axios.post(`${API_URL}/pages/import`, form, {
-      headers,
-    });
-    const newPageId = response.data.data.id;
-
-    // 2. Move to parent if needed
-    if (parentPageId) {
-      await this.movePage(newPageId, parentPageId);
-    }
-
-    // Return the final page object
-    return this.getPage(newPageId);
-  }
-
-  /**
-   * Update a page's content and optionally its title.
-   * Leverages WebSocket collaboration to update content without changing Page ID.
-   */
-  async updatePage(pageId: string, content: string, title?: string) {
-    await this.ensureAuthenticated();
-
-    // 1. Update Title via REST API if provided
-    if (title) {
-      await this.client.post("/pages/update", { pageId, title });
-    }
-
-    // 2. Update Content via WebSocket
-    let collabToken = "";
-    try {
-      const baseURL = this.client.defaults.baseURL || "";
-      collabToken = await getCollabToken(baseURL, this.token!);
-      await updatePageContentRealtime(pageId, content, collabToken, baseURL);
-    } catch (error: any) {
-      console.error(
-        "Failed to update page content via realtime collaboration:",
-        error,
-      );
-      const tokenPreview = collabToken
-        ? collabToken.substring(0, 15) + "..."
-        : "null";
-      throw new Error(
-        `Failed to update page content: ${error.message} (Token: ${tokenPreview})`,
-      );
-    }
-
-    return {
-      success: true,
-      modified: true,
-      message: "Page updated successfully.",
-      pageId: pageId,
-    };
-  }
-
-  async search(query: string, spaceId?: string) {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/search", {
-      query,
-      spaceId,
-    });
-
-    // Docmost API returns { data: { items: [...] }, success, status }
-    const items = response.data?.data?.items || [];
-    const filteredItems = Array.isArray(items)
-      ? items.map((item: any) => filterSearchResult(item))
-      : [];
-
-    return {
-      items: filteredItems,
-    };
-  }
-
-  async movePage(
-    pageId: string,
-    parentPageId: string | null,
-    position?: string,
-  ) {
-    await this.ensureAuthenticated();
-    // Docmost requires position >= 5 chars.
-    const validPosition = position || "a00000";
-
-    return this.client
-      .post("/pages/move", {
-        pageId,
-        parentPageId,
-        position: validPosition,
-      })
-      .then((res) => res.data);
-  }
-
-  async deletePage(pageId: string) {
-    await this.ensureAuthenticated();
-    return this.client
-      .post("/pages/delete", { pageId })
-      .then((res) => res.data);
-  }
-
-  async deletePages(pageIds: string[]) {
-    await this.ensureAuthenticated();
-    const promises = pageIds.map((id) =>
-      this.client
-        .post("/pages/delete", { pageId: id })
-        .then(() => ({ id, success: true }))
-        .catch((err: any) => ({ id, success: false, error: err.message })),
-    );
-    return Promise.all(promises);
-  }
-
-  async getPageHistory(pageId: string, cursor?: string) {
-    await this.ensureAuthenticated();
-    const payload: Record<string, any> = { pageId };
-    if (cursor) payload.cursor = cursor;
-    const response = await this.client.post("/pages/history", payload);
-    const data = response.data.data || response.data;
-    const items = data.items || [];
-    return {
-      items: items.map((entry: any) => filterHistoryEntry(entry)),
-      cursor: data.cursor || null,
-    };
-  }
-
-  async getPageHistoryDetail(historyId: string) {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/pages/history/info", {
-      historyId,
-    });
-    const entry = response.data.data || response.data;
-    const content = entry.content
-      ? convertProseMirrorToMarkdown(entry.content)
-      : "";
-    return filterHistoryDetail(entry, content);
-  }
-
-  async restorePage(pageId: string) {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/pages/restore", { pageId });
-    return response.data;
-  }
-
-  async getTrash(spaceId: string) {
-    const pages = await this.paginateAll("/pages/trash", { spaceId });
-    return pages.map((page: any) => filterPage(page));
-  }
-
-  async duplicatePage(pageId: string, spaceId?: string) {
-    await this.ensureAuthenticated();
-    const payload: Record<string, any> = { pageId };
-    if (spaceId) payload.spaceId = spaceId;
-    const response = await this.client.post("/pages/duplicate", payload);
-    const newPage = response.data.data || response.data;
-    return filterPage(newPage);
-  }
-
-  async getPageBreadcrumbs(pageId: string) {
-    await this.ensureAuthenticated();
-    const response = await this.client.post("/pages/breadcrumbs", { pageId });
-    const items = response.data.data || response.data;
-    return Array.isArray(items)
-      ? items.map((b: any) => ({ id: b.id, title: b.title }))
-      : items;
-  }
+  return new CliError("INTERNAL_ERROR", "Unknown error");
 }
 
-const docmostClient = new DocmostClient(API_URL);
-
-// --- Modern McpServer Implementation ---
-
-const server = new McpServer({
-  name: "docmost-mcp",
-  version: VERSION,
-});
-
-// Helper to format JSON responses
-const jsonContent = (data: any) => ({
-  content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
-});
-
-// Tool: list_workspaces
-server.registerTool(
-  "get_workspace",
-  {
-    description: "Get the current Docmost workspace",
-  },
-  async () => {
-    const workspace = await docmostClient.getWorkspace();
-    return jsonContent(workspace);
-  },
-);
-
-// Tool: list_spaces
-server.registerTool(
-  "list_spaces",
-  {
-    description: "List all available spaces in Docmost",
-  },
-  async () => {
-    const spaces = await docmostClient.getSpaces();
-    return jsonContent(spaces);
-  },
-);
-
-// Tool: list_groups
-server.registerTool(
-  "list_groups",
-  {
-    description: "List all available groups in Docmost",
-  },
-  async () => {
-    const groups = await docmostClient.getGroups();
-    return jsonContent(groups);
-  },
-);
-
-// Tool: list_pages
-server.registerTool(
-  "list_pages",
-  {
-    description: "List pages in a space ordered by updatedAt (descending).",
-    inputSchema: {
-      spaceId: z.string().optional(),
-    },
-  },
-  async ({ spaceId }) => {
-    const result = await docmostClient.listPages(spaceId);
-    return jsonContent(result);
-  },
-);
-
-// Tool: get_page
-server.registerTool(
-  "get_page",
-  {
-    description: "Get details and content of a specific page by ID",
-    inputSchema: {
-      pageId: z.string(),
-    },
-  },
-  async ({ pageId }) => {
-    const page = await docmostClient.getPage(pageId);
-    return jsonContent(page);
-  },
-);
-
-// Tool: create_page (Smart)
-server.registerTool(
-  "create_page",
-  {
-    description:
-      "Create a new page with content (automatically moves it to the correct hierarchy).",
-    inputSchema: {
-      title: z.string().describe("Title of the page"),
-      content: z.string().describe("Markdown content"),
-      spaceId: z.string(),
-      parentPageId: z
-        .string()
-        .optional()
-        .describe("Optional parent page ID to nest under"),
-    },
-  },
-  async ({ title, content, spaceId, parentPageId }) => {
-    const result = await docmostClient.createPage(
-      title,
-      content,
-      spaceId,
-      parentPageId,
-    );
-    return jsonContent(result);
-  },
-);
-
-// Tool: update_page (Safe)
-server.registerTool(
-  "update_page",
-  {
-    description:
-      "Update a page's content and/or title via realtime collaboration (preserves Page ID and history).",
-    inputSchema: {
-      pageId: z.string().describe("ID of the page to update"),
-      content: z.string().describe("New Markdown content"),
-      title: z.string().optional().describe("Optional new title"),
-    },
-  },
-  async ({ pageId, content, title }) => {
-    const result = await docmostClient.updatePage(pageId, content, title);
-    return jsonContent(result);
-  },
-);
-
-// Tool: move_page
-server.registerTool(
-  "move_page",
-  {
-    description:
-      "Move a page to a new parent (nesting) or root. Essential for organizing pages created via 'import_page'.",
-    inputSchema: {
-      pageId: z.string(),
-      parentPageId: z
-        .string()
-        .nullable()
-        .optional()
-        .describe(
-          "Target parent page ID. Pass 'null' or empty string to move to root.",
-        ),
-      position: z
-        .string()
-        .optional()
-        .describe(
-          "Optional position string (5-12 chars). Defaults to 'a00000' (end) if omitted.",
-        ),
-    },
-  },
-  async ({ pageId, parentPageId, position }) => {
-    // Ensure parentPageId is null if string "null" or empty is passed, or undefined
-    // Note: Zod handles type checking, but we double check for empty strings just in case
-    const finalParentId =
-      parentPageId === "" || parentPageId === "null" ? null : parentPageId;
-
-    await docmostClient.movePage(pageId, finalParentId || null, position);
-    return {
-      content: [
+function printError(error: CliError, output: OutputFormat) {
+  if (output === "json") {
+    console.error(
+      JSON.stringify(
         {
-          type: "text",
-          text: `Successfully moved page ${pageId} to parent ${finalParentId || "root"}`,
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+          },
         },
-      ],
-    };
-  },
-);
-
-// Tool: delete_page
-server.registerTool(
-  "delete_page",
-  {
-    description: "Delete a single page by ID.",
-    inputSchema: {
-      pageId: z.string(),
-    },
-  },
-  async ({ pageId }) => {
-    await docmostClient.deletePage(pageId);
-    return {
-      content: [{ type: "text", text: `Successfully deleted page ${pageId}` }],
-    };
-  },
-);
-
-// Tool: delete_pages
-server.registerTool(
-  "delete_pages",
-  {
-    description: "Delete multiple pages at once. Useful for cleanup.",
-    inputSchema: {
-      pageIds: z.array(z.string()),
-    },
-  },
-  async ({ pageIds }) => {
-    const results = await docmostClient.deletePages(pageIds);
-    return jsonContent(results);
-  },
-);
-
-// Tool: search
-server.registerTool(
-  "search",
-  {
-    description: "Search for pages and content.",
-    inputSchema: {
-      query: z.string().describe("Search query"),
-      spaceId: z.string().optional().describe("Optional space ID to filter by"),
-    },
-  },
-  async ({ query, spaceId }) => {
-    const result = await docmostClient.search(query, spaceId);
-    return jsonContent(result);
-  },
-);
-
-// Tool: page_history
-server.registerTool(
-  "page_history",
-  {
-    description:
-      "Get the version history of a page. Returns a list of versions with metadata. Uses cursor-based pagination.",
-    inputSchema: {
-      pageId: z.string().describe("ID of the page"),
-      cursor: z
-        .string()
-        .optional()
-        .describe("Cursor for next page of results"),
-    },
-  },
-  async ({ pageId, cursor }) => {
-    const result = await docmostClient.getPageHistory(pageId, cursor);
-    return jsonContent(result);
-  },
-);
-
-// Tool: page_history_detail
-server.registerTool(
-  "page_history_detail",
-  {
-    description:
-      "Get the content of a specific page version from history. Returns the version metadata and markdown content.",
-    inputSchema: {
-      historyId: z.string().describe("ID of the history entry"),
-    },
-  },
-  async ({ historyId }) => {
-    const result = await docmostClient.getPageHistoryDetail(historyId);
-    return jsonContent(result);
-  },
-);
-
-// Tool: restore_page
-server.registerTool(
-  "restore_page",
-  {
-    description: "Restore a deleted page from trash.",
-    inputSchema: {
-      pageId: z.string().describe("ID of the deleted page to restore"),
-    },
-  },
-  async ({ pageId }) => {
-    await docmostClient.restorePage(pageId);
-    return {
-      content: [
-        { type: "text" as const, text: `Successfully restored page ${pageId}` },
-      ],
-    };
-  },
-);
-
-// Tool: trash
-server.registerTool(
-  "trash",
-  {
-    description: "List deleted pages in a space (trash).",
-    inputSchema: {
-      spaceId: z.string().describe("ID of the space"),
-    },
-  },
-  async ({ spaceId }) => {
-    const result = await docmostClient.getTrash(spaceId);
-    return jsonContent(result);
-  },
-);
-
-// Tool: duplicate_page
-server.registerTool(
-  "duplicate_page",
-  {
-    description: "Duplicate a page. Optionally specify a target space.",
-    inputSchema: {
-      pageId: z.string().describe("ID of the page to duplicate"),
-      spaceId: z
-        .string()
-        .optional()
-        .describe("Optional target space ID (defaults to same space)"),
-    },
-  },
-  async ({ pageId, spaceId }) => {
-    const result = await docmostClient.duplicatePage(pageId, spaceId);
-    return jsonContent(result);
-  },
-);
-
-// Tool: breadcrumbs
-server.registerTool(
-  "breadcrumbs",
-  {
-    description:
-      "Get the breadcrumb path from root to a page. Useful for understanding page hierarchy.",
-    inputSchema: {
-      pageId: z.string().describe("ID of the page"),
-    },
-  },
-  async ({ pageId }) => {
-    const result = await docmostClient.getPageBreadcrumbs(pageId);
-    return jsonContent(result);
-  },
-);
-
-async function run() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+        null,
+        2,
+      ),
+    );
+  } else {
+    console.error(`Error [${error.code}]: ${error.message}`);
+    if (error.details) {
+      console.error(JSON.stringify(error.details, null, 2));
+    }
+  }
 }
 
-run().catch((error) => {
-  console.error("Fatal error running server:", error);
-  process.exit(1);
-});
+function getSafeOutput(program: Command): OutputFormat {
+  const opts = program.opts<GlobalOptions>();
+  try {
+    return normalizeOutputFormat(opts.output);
+  } catch {
+    return "json";
+  }
+}
+
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    throw new CliError(
+      "VALIDATION_ERROR",
+      "No stdin data. Pipe content or use @file syntax.",
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    let data = "";
+
+    process.stdin.setEncoding("utf-8");
+    process.stdin.on("data", (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on("end", () => {
+      if (!data.trim()) {
+        reject(new CliError("VALIDATION_ERROR", "Stdin is empty. Provide content via pipe."));
+        return;
+      }
+      resolve(data);
+    });
+    process.stdin.on("error", reject);
+  });
+}
+
+async function resolveContentInput(content: string): Promise<string> {
+  if (content === "-") {
+    return readStdin();
+  }
+
+  if (content.startsWith("@")) {
+    const filePath = content.slice(1);
+    if (!filePath) {
+      throw new CliError(
+        "VALIDATION_ERROR",
+        "Invalid content file syntax. Use --content @path/to/file.md",
+      );
+    }
+    try {
+      return await readFile(filePath, "utf-8");
+    } catch (err: any) {
+      throw new CliError(
+        "VALIDATION_ERROR",
+        `Cannot read file '${filePath}': ${err.code || err.message}`,
+      );
+    }
+  }
+
+  return content;
+}
+
+function parsePageIds(csv: string): string[] {
+  const pageIds = csv
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  if (pageIds.length === 0) {
+    throw new CliError("VALIDATION_ERROR", "--page-ids must not be empty");
+  }
+
+  return pageIds;
+}
+
+async function withClient(
+  program: Command,
+  run: (client: DocmostClient, opts: ResolvedOptions) => Promise<void>,
+) {
+  const opts = resolveOptions(program.opts<GlobalOptions>());
+  const client = new DocmostClient(opts.apiUrl, opts.auth);
+  await run(client, opts);
+}
+
+function registerCommands(program: Command) {
+  program
+    .command("workspace")
+    .description("Get the current Docmost workspace")
+    .action(() =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.getWorkspace();
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("list-spaces")
+    .description("List all available spaces")
+    .action(() =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.getSpaces();
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("list-groups")
+    .description("List all available groups")
+    .action(() =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.getGroups();
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("list-pages")
+    .description("List pages")
+    .option("-s, --space-id <id>", "Filter by space ID")
+    .action((options: { spaceId?: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.listPages(options.spaceId);
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("get-page")
+    .description("Get page by ID")
+    .requiredOption("--page-id <id>", "Page ID")
+    .action((options: { pageId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true, allowText: true });
+        const result = await client.getPage(options.pageId);
+        printResult(result, opts.output, {
+          allowTable: true,
+          textExtractor: (data) => {
+            const value = data as { data?: { content?: string } };
+            return value.data?.content;
+          },
+        });
+      }),
+    );
+
+  program
+    .command("create-page")
+    .description("Create a new page")
+    .requiredOption("--title <title>", "Page title")
+    .requiredOption("--content <content>", "Content literal, @file, or - for stdin")
+    .requiredOption("--space-id <id>", "Space ID")
+    .option("--parent-page-id <id>", "Parent page ID")
+    .action(
+      (options: {
+        title: string;
+        content: string;
+        spaceId: string;
+        parentPageId?: string;
+      }) =>
+        withClient(program, async (client, opts) => {
+          ensureOutputSupported(opts.output);
+          const content = await resolveContentInput(options.content);
+          const result = await client.createPage(
+            options.title,
+            content,
+            options.spaceId,
+            options.parentPageId,
+          );
+          printResult(result, opts.output);
+        }),
+    );
+
+  program
+    .command("update-page")
+    .description("Update page content and optional title")
+    .requiredOption("--page-id <id>", "Page ID")
+    .requiredOption("--content <content>", "Content literal, @file, or - for stdin")
+    .option("--title <title>", "New page title")
+    .action((options: { pageId: string; content: string; title?: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
+        const content = await resolveContentInput(options.content);
+        const result = await client.updatePage(options.pageId, content, options.title);
+        printResult(result, opts.output);
+      }),
+    );
+
+  program
+    .command("move-page")
+    .description("Move page to a different parent or to root")
+    .requiredOption("--page-id <id>", "Page ID")
+    .option("--parent-page-id <id>", "Target parent page ID")
+    .option("--position <pos>", "Position string (5-12 chars)")
+    .option("--root", "Move page to root")
+    .action(
+      (options: {
+        pageId: string;
+        parentPageId?: string;
+        position?: string;
+        root?: boolean;
+      }) =>
+        withClient(program, async (client, opts) => {
+          ensureOutputSupported(opts.output);
+          if (options.root && options.parentPageId) {
+            throw new CliError(
+              "VALIDATION_ERROR",
+              "--root and --parent-page-id are mutually exclusive.",
+            );
+          }
+          if (!options.root && !options.parentPageId) {
+            throw new CliError(
+              "VALIDATION_ERROR",
+              "Specify --parent-page-id <id> or --root.",
+            );
+          }
+
+          const parentPageId = options.root ? null : (options.parentPageId ?? null);
+          const result = await client.movePage(
+            options.pageId,
+            parentPageId,
+            options.position,
+          );
+          printResult(result, opts.output);
+        }),
+    );
+
+  program
+    .command("delete-page")
+    .description("Delete a page")
+    .requiredOption("--page-id <id>", "Page ID")
+    .option("--permanent", "Permanently delete page (no trash)")
+    .action((options: { pageId: string; permanent?: boolean }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
+        const result = await client.deletePage(options.pageId, options.permanent);
+        printResult(result, opts.output);
+      }),
+    );
+
+  program
+    .command("delete-pages")
+    .description("Delete multiple pages")
+    .requiredOption("--page-ids <id1,id2,...>", "Comma-separated page IDs")
+    .action((options: { pageIds: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const pageIds = parsePageIds(options.pageIds);
+        const result = await client.deletePages(pageIds);
+        printResult(result, opts.output, { allowTable: true });
+        const failed = result.filter((r) => !r.success);
+        if (failed.length > 0) {
+          throw new CliError(
+            "INTERNAL_ERROR",
+            `Failed to delete ${failed.length} of ${result.length} pages.`,
+          );
+        }
+      }),
+    );
+
+  program
+    .command("search")
+    .description("Search pages and content")
+    .argument("<query>", "Search query")
+    .option("-s, --space-id <id>", "Filter by space ID")
+    .action((query: string, options: { spaceId?: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.search(query, options.spaceId);
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("page-history")
+    .description("Get page version history")
+    .requiredOption("--page-id <id>", "Page ID")
+    .option("--cursor <cursor>", "Pagination cursor")
+    .action((options: { pageId: string; cursor?: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.getPageHistory(options.pageId, options.cursor);
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("page-history-detail")
+    .description("Get specific page history entry")
+    .requiredOption("--history-id <id>", "History entry ID")
+    .action((options: { historyId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true, allowText: true });
+        const result = await client.getPageHistoryDetail(options.historyId);
+        printResult(result, opts.output, {
+          allowTable: true,
+          textExtractor: (data) => {
+            const value = data as { content?: string };
+            return value.content;
+          },
+        });
+      }),
+    );
+
+  program
+    .command("restore-page")
+    .description("Restore page from trash")
+    .requiredOption("--page-id <id>", "Page ID")
+    .action((options: { pageId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
+        const result = await client.restorePage(options.pageId);
+        printResult(result, opts.output);
+      }),
+    );
+
+  program
+    .command("trash")
+    .description("List deleted pages in a space")
+    .requiredOption("--space-id <id>", "Space ID")
+    .action((options: { spaceId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.getTrash(options.spaceId);
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("duplicate-page")
+    .description("Duplicate page")
+    .requiredOption("--page-id <id>", "Page ID")
+    .option("--space-id <id>", "Target space ID")
+    .action((options: { pageId: string; spaceId?: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output);
+        const result = await client.duplicatePage(options.pageId, options.spaceId);
+        printResult(result, opts.output);
+      }),
+    );
+
+  program
+    .command("breadcrumbs")
+    .description("Get breadcrumb path for page")
+    .requiredOption("--page-id <id>", "Page ID")
+    .action((options: { pageId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts.output, { allowTable: true });
+        const result = await client.getPageBreadcrumbs(options.pageId);
+        printResult(result, opts.output, { allowTable: true });
+      }),
+    );
+}
+
+async function main() {
+  const program = new Command()
+    .name("docmost")
+    .description("CLI for Docmost documentation platform")
+    .version(pkg.version)
+    .showHelpAfterError()
+    .option("-u, --api-url <url>", "Docmost API URL")
+    .option("-e, --email <email>", "Docmost account email")
+    .option("--password <password>", "Docmost account password (prefer DOCMOST_PASSWORD env var)")
+    .option("-t, --token <token>", "Docmost API auth token")
+    .option("-o, --output <format>", "Output format: json | table | text", "json")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "Examples:",
+        "  docmost --api-url http://localhost:3000/api --token <token> workspace",
+        "  DOCMOST_PASSWORD=secret docmost --api-url http://localhost:3000/api --email admin@example.com search \"onboarding\"",
+        "  docmost list-pages --space-id <space-id> --output table",
+        "  docmost get-page --page-id <page-id> --output text",
+        "",
+        "Auth precedence:",
+        "  1) --token, then DOCMOST_TOKEN",
+        "  2) --email/--password, then DOCMOST_EMAIL/DOCMOST_PASSWORD",
+        "",
+        "Security: CLI flags are visible in process lists. Use env vars for credentials.",
+      ].join("\n"),
+    )
+    .exitOverride();
+
+  registerCommands(program);
+
+  try {
+    await program.parseAsync(process.argv);
+  } catch (error: unknown) {
+    if (isCommanderHelpExit(error)) {
+      process.exit(0);
+    }
+
+    const output = getSafeOutput(program);
+    const normalized = normalizeError(error);
+    printError(normalized, output);
+    process.exit(normalized.exitCode);
+  }
+}
+
+main();

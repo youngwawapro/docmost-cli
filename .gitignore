@@ -7,3 +7,4 @@ mcp_config.json
 
 # Claude Code ctags index
 .claude/tags
+.env.local
