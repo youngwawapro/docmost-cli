@@ -88,7 +88,7 @@ function resolveOptions(raw: GlobalOptions): ResolvedOptions {
   return {
     apiUrl,
     output: normalizeOutputFormat(raw.output),
-    auth: token ? { token } : { email, password },
+    auth: token ? { token } : { email: email!, password: password! },
   };
 }
 
@@ -317,7 +317,13 @@ async function readStdin(): Promise<string> {
     process.stdin.on("data", (chunk) => {
       data += chunk;
     });
-    process.stdin.on("end", () => resolve(data));
+    process.stdin.on("end", () => {
+      if (!data.trim()) {
+        reject(new CliError("VALIDATION_ERROR", "Stdin is empty. Provide content via pipe."));
+        return;
+      }
+      resolve(data);
+    });
     process.stdin.on("error", reject);
   });
 }
@@ -537,6 +543,14 @@ function registerCommands(program: Command) {
         ensureOutputSupported(opts.output, { allowTable: true });
         const pageIds = parsePageIds(options.pageIds);
         const result = await client.deletePages(pageIds);
+        const failed = result.filter((r) => !r.success);
+        if (failed.length > 0) {
+          printResult(result, opts.output, { allowTable: true });
+          throw new CliError(
+            "INTERNAL_ERROR",
+            `Failed to delete ${failed.length} of ${result.length} pages.`,
+          );
+        }
         printResult(result, opts.output, { allowTable: true });
       }),
     );

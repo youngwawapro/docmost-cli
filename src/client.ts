@@ -88,8 +88,9 @@ export class DocmostClient {
       });
 
       const data = response.data;
-      const items = data.data?.items ?? data.items ?? [];
-      const meta = data.data?.meta ?? data.meta;
+      const inner = data.data ?? data;
+      const items = inner.items ?? [];
+      const meta = inner.meta;
 
       allItems = allItems.concat(items);
       hasNextPage = meta?.hasNextPage ?? false;
@@ -131,7 +132,7 @@ export class DocmostClient {
       pageId,
       page: 1,
     });
-    return response.data?.data?.items || [];
+    return response.data?.data?.items ?? [];
   }
 
   async getPage(pageId: string) {
@@ -151,6 +152,8 @@ export class DocmostClient {
       if (axios.isAxiosError(error) && (error.response?.status === 401 || error.response?.status === 403)) {
         throw error;
       }
+      const msg = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Warning: failed to fetch subpages: ${msg}\n`);
     }
 
     if (content && content.includes("{{SUBPAGES}}")) {
@@ -183,7 +186,7 @@ export class DocmostClient {
         await this.getPage(parentPageId);
       } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 404) {
-          throw new Error(`Parent page with ID ${parentPageId} not found.`);
+          throw error;
         }
         throw error;
       }
@@ -222,9 +225,13 @@ export class DocmostClient {
       await this.client.post("/pages/update", { pageId, title });
     }
 
+    if (!this.token) {
+      throw new Error("Authentication token is not available.");
+    }
+
     let collabToken = "";
     try {
-      collabToken = await getCollabToken(this.baseURL, this.token!);
+      collabToken = await getCollabToken(this.baseURL, this.token);
       await updatePageContentRealtime(pageId, content, collabToken, this.baseURL);
     } catch (error: any) {
       if (axios.isAxiosError(error)) {
@@ -251,7 +258,7 @@ export class DocmostClient {
       spaceId,
     });
 
-    const items = response.data?.data?.items || [];
+    const items = response.data?.data?.items ?? [];
     const filteredItems = Array.isArray(items)
       ? items.map((item: any) => filterSearchResult(item))
       : [];
@@ -311,8 +318,8 @@ export class DocmostClient {
     }
 
     const response = await this.client.post("/pages/history", payload);
-    const data = response.data.data || response.data;
-    const items = data.items || [];
+    const data = response.data.data ?? response.data;
+    const items = data.items ?? [];
     return {
       items: items.map((entry: any) => filterHistoryEntry(entry)),
       cursor: data.cursor || null,
@@ -324,7 +331,7 @@ export class DocmostClient {
     const response = await this.client.post("/pages/history/info", {
       historyId,
     });
-    const entry = response.data.data || response.data;
+    const entry = response.data.data ?? response.data;
     const content = entry.content
       ? convertProseMirrorToMarkdown(entry.content)
       : "";
@@ -349,14 +356,14 @@ export class DocmostClient {
       payload.spaceId = spaceId;
     }
     const response = await this.client.post("/pages/duplicate", payload);
-    const newPage = response.data.data || response.data;
+    const newPage = response.data.data ?? response.data;
     return filterPage(newPage);
   }
 
   async getPageBreadcrumbs(pageId: string) {
     await this.ensureAuthenticated();
     const response = await this.client.post("/pages/breadcrumbs", { pageId });
-    const items = response.data.data || response.data;
+    const items = response.data.data ?? response.data;
     return Array.isArray(items)
       ? items.map((breadcrumb: any) => ({
           id: breadcrumb.id,
