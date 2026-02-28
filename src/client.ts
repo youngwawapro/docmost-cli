@@ -12,6 +12,7 @@ import {
   filterInvite,
   filterUser,
   filterComment,
+  filterShare,
 } from "./lib/filters.js";
 import { convertProseMirrorToMarkdown } from "./lib/markdown-converter.js";
 import { updatePageContentRealtime } from "./lib/collaboration.js";
@@ -610,6 +611,51 @@ export class DocmostClient {
   async deleteComment(commentId: string) {
     await this.ensureAuthenticated();
     const response = await this.client.post("/comments/delete", { commentId });
+    return response.data;
+  }
+
+  // Share methods
+
+  async getShares() {
+    const shares = await this.paginateAll("/shares", {});
+    return shares.map((s: any) => filterShare(s));
+  }
+
+  async getShareInfo(shareId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/shares/info", { shareId });
+    return filterShare(response.data.data ?? response.data);
+  }
+
+  async getShareForPage(pageId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/shares/for-page", { pageId });
+    return filterShare(response.data.data ?? response.data);
+  }
+
+  async createShare(pageId: string, includeSubPages?: boolean, searchIndexing?: boolean) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/shares/create", {
+      pageId,
+      ...(includeSubPages !== undefined && { includeSubPages }),
+      ...(searchIndexing !== undefined && { searchIndexing }),
+    });
+    return filterShare(response.data.data ?? response.data);
+  }
+
+  async updateShare(shareId: string, includeSubPages?: boolean, searchIndexing?: boolean) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/shares/update", {
+      shareId,
+      ...(includeSubPages !== undefined && { includeSubPages }),
+      ...(searchIndexing !== undefined && { searchIndexing }),
+    });
+    return response.data;
+  }
+
+  async deleteShare(shareId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/shares/delete", { shareId });
     return response.data;
   }
 }

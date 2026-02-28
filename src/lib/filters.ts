@@ -131,6 +131,16 @@ export function filterComment(comment: any) {
   };
 }
 
+export function filterShare(share: any) {
+  return {
+    id: share.id,
+    pageId: share.pageId,
+    includeSubPages: share.includeSubPages,
+    searchIndexing: share.searchIndexing,
+    createdAt: share.createdAt,
+  };
+}
+
 export function filterHistoryDetail(entry: any, content?: string) {
   return {
     ...filterHistoryEntry(entry),
