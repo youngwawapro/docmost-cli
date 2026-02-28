@@ -108,3 +108,19 @@ docmost search "query text" --space-id <spaceId> --output json
 ```
 
 Note: query is a positional argument, not a flag.
+
+### History
+
+```bash
+docmost page-history --page-id <pageId> --output json
+docmost page-history --page-id <pageId> --cursor <cursor> --output json
+docmost page-history-detail --history-id <historyId> --output json
+docmost page-history-detail --history-id <historyId> --output text
+docmost restore-page --page-id <pageId> --output json
+```
+
+### Trash
+
+```bash
+docmost trash --space-id <spaceId> --output json
+```
