@@ -25,7 +25,7 @@ const pkg = JSON.parse(
 async function main() {
   const program = new Command()
     .name("docmost")
-    .description("CLI for Docmost documentation platform")
+    .description("Agent-first CLI for Docmost documentation platform")
     .version(pkg.version)
     .showHelpAfterError()
     .option("-u, --api-url <url>", "Docmost API URL")
@@ -41,10 +41,11 @@ async function main() {
       [
         "",
         "Examples:",
-        "  docmost --api-url http://localhost:3000/api --token <token> workspace-info",
-        "  DOCMOST_PASSWORD=secret docmost --api-url http://localhost:3000/api --email admin@example.com search --query \"onboarding\"",
+        "  docmost workspace-info",
         "  docmost page-list --space-id <space-id> --format table",
         "  docmost page-info --page-id <page-id> --format text",
+        "  docmost search --query \"onboarding\"",
+        "  docmost space-list --format table",
         "",
         "Auth precedence:",
         "  1) --token, then DOCMOST_TOKEN",
@@ -54,10 +55,6 @@ async function main() {
       ].join("\n"),
     )
     .exitOverride();
-
-  // Hidden alias: keep -o/--output working during transition
-  program.option("-o, --output <format>", undefined);
-  (program.options.find((o: any) => o.long === "--output") as any).hidden = true;
 
   registerPageCommands(program);
   registerWorkspaceCommands(program);
