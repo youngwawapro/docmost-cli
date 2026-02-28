@@ -1,4 +1,5 @@
-import { Command } from "commander";
+import { writeFileSync } from "fs";
+import { Command, Option } from "commander";
 import {
   type ResolvedOptions,
   CliError,
@@ -43,24 +44,23 @@ export function register(program: Command) {
   program
     .command("page-create")
     .description("Create a new page")
-    .requiredOption("--title <title>", "Page title")
-    .requiredOption("--content <content>", "Content literal, @file, or - for stdin")
     .requiredOption("--space-id <id>", "Space ID")
+    .option("--title <title>", "Page title")
+    .option("--icon <icon>", "Page icon")
     .option("--parent-page-id <id>", "Parent page ID")
     .action(
       (options: {
-        title: string;
-        content: string;
         spaceId: string;
+        title?: string;
+        icon?: string;
         parentPageId?: string;
       }) =>
         withClient(program, async (client, opts) => {
           ensureOutputSupported(opts);
-          const content = await resolveContentInput(options.content);
           const result = await client.createPage(
-            options.title,
-            content,
             options.spaceId,
+            options.title,
+            options.icon,
             options.parentPageId,
           );
           printResult(result, opts);
@@ -245,6 +245,100 @@ export function register(program: Command) {
         ensureOutputSupported(opts, { allowTable: true });
         const result = await client.getPageBreadcrumbs(options.pageId);
         printResult(result, opts, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("page-tree")
+    .description("Get page tree for a space or page")
+    .option("-s, --space-id <id>", "Space ID")
+    .option("--page-id <id>", "Page ID")
+    .action((options: { spaceId?: string; pageId?: string }) =>
+      withClient(program, async (client, opts) => {
+        if (!options.spaceId && !options.pageId) {
+          throw new CliError(
+            "VALIDATION_ERROR",
+            "At least one of --space-id or --page-id is required.",
+          );
+        }
+        ensureOutputSupported(opts, { allowTable: true });
+        const result = await client.getPageTree(options.spaceId, options.pageId);
+        printResult(result, opts, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("page-move-to-space")
+    .description("Move page to a different space")
+    .requiredOption("--page-id <id>", "Page ID")
+    .requiredOption("--space-id <id>", "Target space ID")
+    .action((options: { pageId: string; spaceId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts);
+        const result = await client.movePageToSpace(options.pageId, options.spaceId);
+        printResult(result, opts);
+      }),
+    );
+
+  program
+    .command("page-export")
+    .description("Export page content")
+    .requiredOption("--page-id <id>", "Page ID")
+    .addOption(
+      new Option("--export-format <format>", "Export format").choices(["html", "markdown"]).makeOptionMandatory(),
+    )
+    .option("--output <path>", "Output file path")
+    .option("--include-children", "Include child pages")
+    .option("--include-attachments", "Include attachments")
+    .action(
+      (options: {
+        pageId: string;
+        exportFormat: string;
+        output?: string;
+        includeChildren?: boolean;
+        includeAttachments?: boolean;
+      }) =>
+        withClient(program, async (client) => {
+          const data = await client.exportPage(
+            options.pageId,
+            options.exportFormat,
+            options.includeChildren,
+            options.includeAttachments,
+          );
+          if (options.output) {
+            writeFileSync(options.output, Buffer.from(data));
+          } else {
+            process.stdout.write(Buffer.from(data));
+          }
+        }),
+    );
+
+  program
+    .command("page-import")
+    .description("Import a page from file")
+    .requiredOption("--file <path>", "File to import")
+    .requiredOption("--space-id <id>", "Space ID")
+    .action((options: { file: string; spaceId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts);
+        const result = await client.importPage(options.file, options.spaceId);
+        printResult(result, opts);
+      }),
+    );
+
+  program
+    .command("page-import-zip")
+    .description("Import pages from a zip archive")
+    .requiredOption("--file <path>", "Zip file to import")
+    .requiredOption("--space-id <id>", "Space ID")
+    .addOption(
+      new Option("--source <source>", "Import source").choices(["generic", "notion", "confluence"]).makeOptionMandatory(),
+    )
+    .action((options: { file: string; spaceId: string; source: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts);
+        const result = await client.importZip(options.file, options.spaceId, options.source);
+        printResult(result, opts);
       }),
     );
 }

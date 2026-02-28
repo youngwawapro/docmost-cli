@@ -1,3 +1,4 @@
+import { createReadStream } from "fs";
 import FormData from "form-data";
 import axios, { AxiosInstance } from "axios";
 import {
@@ -192,50 +193,64 @@ export class DocmostClient {
     };
   }
 
-  async createPage(
-    title: string,
-    content: string,
-    spaceId: string,
-    parentPageId?: string,
-  ) {
+  async createPage(spaceId: string, title?: string, icon?: string, parentPageId?: string) {
     await this.ensureAuthenticated();
+    const response = await this.client.post("/pages/create", {
+      spaceId,
+      ...(title && { title }),
+      ...(icon && { icon }),
+      ...(parentPageId && { parentPageId }),
+    });
+    return response.data.data ?? response.data;
+  }
 
-    if (parentPageId) {
-      try {
-        await this.getPage(parentPageId);
-      } catch {
-        throw new Error(`Parent page with ID '${parentPageId}' not found or not accessible.`);
-      }
-    }
+  async getPageTree(spaceId?: string, pageId?: string) {
+    await this.ensureAuthenticated();
+    if (!spaceId && !pageId) throw new Error("At least one of spaceId or pageId is required");
+    const payload: Record<string, string> = {};
+    if (spaceId) payload.spaceId = spaceId;
+    if (pageId) payload.pageId = pageId;
+    const response = await this.client.post("/pages/sidebar-pages", { ...payload, page: 1 });
+    return response.data?.data?.items ?? [];
+  }
 
+  async movePageToSpace(pageId: string, spaceId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/pages/move-to-space", { pageId, spaceId });
+    return response.data;
+  }
+
+  async exportPage(pageId: string, format: string, includeChildren?: boolean, includeAttachments?: boolean) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/pages/export", {
+      pageId, format,
+      ...(includeChildren !== undefined && { includeChildren }),
+      ...(includeAttachments !== undefined && { includeAttachments }),
+    }, { responseType: "arraybuffer" });
+    return response.data;
+  }
+
+  async importPage(filePath: string, spaceId: string) {
+    await this.ensureAuthenticated();
     const form = new FormData();
     form.append("spaceId", spaceId);
-
-    const fileContent = Buffer.from(content, "utf-8");
-    form.append("file", fileContent, {
-      filename: `${title || "import"}.md`,
-      contentType: "text/markdown",
-    });
-
-    const headers = {
-      ...form.getHeaders(),
-      Authorization: `Bearer ${this.token}`,
-    };
-
+    form.append("file", createReadStream(filePath));
     const response = await axios.post(`${this.baseURL}/pages/import`, form, {
-      headers,
+      headers: { ...form.getHeaders(), Authorization: `Bearer ${this.token}` },
     });
-    const newPageId = response.data.data.id;
+    return response.data;
+  }
 
-    if (title) {
-      await this.client.post("/pages/update", { pageId: newPageId, title });
-    }
-
-    if (parentPageId) {
-      await this.movePage(newPageId, parentPageId);
-    }
-
-    return this.getPage(newPageId);
+  async importZip(filePath: string, spaceId: string, source: string) {
+    await this.ensureAuthenticated();
+    const form = new FormData();
+    form.append("spaceId", spaceId);
+    form.append("source", source);
+    form.append("file", createReadStream(filePath));
+    const response = await axios.post(`${this.baseURL}/pages/import-zip`, form, {
+      headers: { ...form.getHeaders(), Authorization: `Bearer ${this.token}` },
+    });
+    return response.data;
   }
 
   async updatePage(pageId: string, content: string, title?: string, icon?: string) {
