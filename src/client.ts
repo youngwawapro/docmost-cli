@@ -316,20 +316,9 @@ export class DocmostClient {
     return results;
   }
 
-  async getPageHistory(pageId: string, cursor?: string) {
-    await this.ensureAuthenticated();
-    const payload: Record<string, string> = { pageId };
-    if (cursor) {
-      payload.cursor = cursor;
-    }
-
-    const response = await this.client.post("/pages/history", payload);
-    const data = response.data.data ?? response.data;
-    const items = data.items ?? [];
-    return {
-      items: items.map((entry: any) => filterHistoryEntry(entry)),
-      cursor: data.cursor || null,
-    };
+  async getPageHistory(pageId: string, limit?: number, maxItems?: number) {
+    const items = await this.paginateAll("/pages/history", { pageId }, limit, maxItems);
+    return items.map((entry: any) => filterHistoryEntry(entry));
   }
 
   async getPageHistoryDetail(historyId: string) {

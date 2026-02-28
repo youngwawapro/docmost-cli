@@ -206,11 +206,10 @@ export function register(program: Command) {
     .command("page-history")
     .description("Get page version history")
     .requiredOption("--page-id <id>", "Page ID")
-    .option("--cursor <cursor>", "Pagination cursor")
-    .action((options: { pageId: string; cursor?: string }) =>
+    .action((options: { pageId: string }) =>
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true });
-        const result = await client.getPageHistory(options.pageId, options.cursor);
+        const result = await client.getPageHistory(options.pageId, opts.limit, opts.maxItems);
         printResult(result, opts, { allowTable: true });
       }),
     );
