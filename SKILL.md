@@ -45,3 +45,23 @@ export DOCMOST_PASSWORD=<password>
 - `--output text` supported only by: `get-page`, `page-history-detail`. Use when user wants raw markdown.
 - `--output table` supported by: `workspace`, `list-spaces`, `list-groups`, `list-pages`, `get-page`, `search`, `page-history`, `page-history-detail`, `trash`, `delete-pages`, `breadcrumbs`. Use for human-readable displays.
 - Commands not listed above support only `--output json`.
+
+## Core Command Patterns
+
+### Workspace
+
+```bash
+docmost workspace --output json
+```
+
+### Spaces
+
+```bash
+docmost list-spaces --output json
+```
+
+### Groups
+
+```bash
+docmost list-groups --output json
+```
