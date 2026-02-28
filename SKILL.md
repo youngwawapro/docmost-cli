@@ -140,3 +140,35 @@ For tasks like "create a page", "update documentation", "organize pages":
    - `docmost update-page --page-id <pageId> --content @file.md --output json`
 5. Verify result:
    - `docmost get-page --page-id <pageId> --output json`
+
+## Trigger Examples
+
+### Should trigger
+
+- "create a page in Docmost"
+- "update the onboarding documentation"
+- "search for API docs in wiki"
+- "list all spaces"
+- "delete the draft page"
+- "move page under Getting Started"
+- "show page history"
+- "restore deleted page"
+- "find pages about deployment"
+- "what pages are in the Engineering space?"
+- "duplicate this page to another space"
+- "создай страницу в Docmost"
+- "обнови документацию"
+- "найди в вики страницу про API"
+- "покажи все пространства"
+- "удали черновик"
+- "перенеси страницу в другой раздел"
+- "покажи историю страницы"
+- "восстанови удалённую страницу"
+
+### Should not trigger
+
+- Editing local files (not Docmost pages)
+- Git operations, CI/CD pipelines
+- Sending messages (use Slack/Telegram skills)
+- Managing users or permissions (use Docmost web UI)
+- Editing page comments (not supported by CLI)
