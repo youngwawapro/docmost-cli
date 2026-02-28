@@ -96,6 +96,28 @@ export function filterMember(member: any) {
   };
 }
 
+export function filterInvite(invite: any) {
+  return {
+    id: invite.id,
+    email: invite.email,
+    role: invite.role,
+    status: invite.status,
+    invitedById: invite.invitedById,
+    createdAt: invite.createdAt,
+  };
+}
+
+export function filterUser(user: any) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    locale: user.locale,
+    createdAt: user.createdAt,
+  };
+}
+
 export function filterHistoryDetail(entry: any, content?: string) {
   return {
     ...filterHistoryEntry(entry),

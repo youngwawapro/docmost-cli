@@ -9,6 +9,8 @@ import {
   filterHistoryEntry,
   filterHistoryDetail,
   filterMember,
+  filterInvite,
+  filterUser,
 } from "./lib/filters.js";
 import { convertProseMirrorToMarkdown } from "./lib/markdown-converter.js";
 import { updatePageContentRealtime } from "./lib/collaboration.js";
@@ -381,6 +383,61 @@ export class DocmostClient {
   async changeMemberRole(userId: string, role: string) {
     await this.ensureAuthenticated();
     const response = await this.client.post("/workspace/members/change-role", { userId, role });
+    return response.data;
+  }
+
+  // Invite methods
+
+  async getInvites() {
+    const invites = await this.paginateAll("/workspace/invites", {});
+    return invites.map((i: any) => filterInvite(i));
+  }
+
+  async getInviteInfo(invitationId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/invites/info", { invitationId });
+    return filterInvite(response.data.data ?? response.data);
+  }
+
+  async createInvite(emails: string[], role: string, groupIds?: string[]) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/invites/create", {
+      emails,
+      role,
+      groupIds: groupIds ?? [],
+    });
+    return response.data;
+  }
+
+  async revokeInvite(invitationId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/invites/revoke", { invitationId });
+    return response.data;
+  }
+
+  async resendInvite(invitationId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/invites/resend", { invitationId });
+    return response.data;
+  }
+
+  async getInviteLink(invitationId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/invites/link", { invitationId });
+    return response.data.data ?? response.data;
+  }
+
+  // User methods
+
+  async getCurrentUser() {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/users/me", {});
+    return filterUser(response.data.data ?? response.data);
+  }
+
+  async updateUser(params: Record<string, unknown>) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/users/update", params);
     return response.data;
   }
 
