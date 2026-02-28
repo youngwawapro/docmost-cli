@@ -77,4 +77,48 @@ export function register(program: Command) {
         }),
     );
 
+  // Member commands
+
+  program
+    .command("member-list")
+    .description("List workspace members")
+    .action(() =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts, { allowTable: true });
+        const result = await client.getMembers();
+        printResult(result, opts, { allowTable: true });
+      }),
+    );
+
+  program
+    .command("member-remove")
+    .description("Remove a member from the workspace")
+    .requiredOption("--user-id <id>", "User ID to remove")
+    .action((options: { userId: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts);
+        const result = await client.removeMember(options.userId);
+        printResult(result, opts);
+      }),
+    );
+
+  program
+    .command("member-role")
+    .description("Change a member's role")
+    .requiredOption("--user-id <id>", "User ID")
+    .requiredOption("--role <role>", "New role")
+    .action((options: { userId: string; role: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts);
+        const validRoles = ["owner", "admin", "member"];
+        if (!validRoles.includes(options.role)) {
+          throw new CliError(
+            "VALIDATION_ERROR",
+            `Invalid role '${options.role}'. Must be one of: ${validRoles.join(", ")}`,
+          );
+        }
+        const result = await client.changeMemberRole(options.userId, options.role);
+        printResult(result, opts);
+      }),
+    );
 }

@@ -8,6 +8,7 @@ import {
   filterSearchResult,
   filterHistoryEntry,
   filterHistoryDetail,
+  filterMember,
 } from "./lib/filters.js";
 import { convertProseMirrorToMarkdown } from "./lib/markdown-converter.js";
 import { updatePageContentRealtime } from "./lib/collaboration.js";
@@ -363,6 +364,23 @@ export class DocmostClient {
   async updateWorkspace(params: Record<string, unknown>) {
     await this.ensureAuthenticated();
     const response = await this.client.post("/workspace/update", params);
+    return response.data;
+  }
+
+  async getMembers() {
+    const members = await this.paginateAll("/workspace/members", {});
+    return members.map((m: any) => filterMember(m));
+  }
+
+  async removeMember(userId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/members/delete", { userId });
+    return response.data;
+  }
+
+  async changeMemberRole(userId: string, role: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/workspace/members/change-role", { userId, role });
     return response.data;
   }
 
