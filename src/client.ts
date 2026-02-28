@@ -125,6 +125,9 @@ export class DocmostClient {
         );
       }
       const meta = inner.meta;
+      if (!meta && items.length === clampedLimit) {
+        process.stderr.write(`Warning: API response from ${endpoint} missing pagination meta; results may be incomplete.\n`);
+      }
 
       allItems = allItems.concat(items);
       hasNextPage = meta?.hasNextPage ?? false;
@@ -166,7 +169,11 @@ export class DocmostClient {
       pageId,
       page: 1,
     });
-    return response.data?.data?.items ?? [];
+    const items = response.data?.data?.items;
+    if (items !== undefined && !Array.isArray(items)) {
+      throw new Error("Unexpected API response from /pages/sidebar-pages: items is not an array");
+    }
+    return items ?? [];
   }
 
   async getPage(pageId: string) {
@@ -284,16 +291,23 @@ export class DocmostClient {
     }
 
     if (content !== undefined) {
+      if (!this.token) {
+        throw new Error("Authentication token is required for content updates");
+      }
       let collabToken = "";
       try {
-        collabToken = await getCollabToken(this.baseURL, this.token!);
+        collabToken = await getCollabToken(this.baseURL, this.token);
+      } catch (error: unknown) {
+        if (axios.isAxiosError(error)) throw error;
+        const cause = error instanceof Error ? error : undefined;
+        throw new Error(`Failed to get collaboration token: ${cause?.message ?? String(error)}`, { cause });
+      }
+      try {
         await updatePageContentRealtime(pageId, content, collabToken, this.baseURL);
       } catch (error: unknown) {
-        if (axios.isAxiosError(error)) {
-          throw error;
-        }
-        const msg = error instanceof Error ? error.message : String(error);
-        throw new Error(`Failed to update page content: ${msg}`, { cause: error });
+        if (axios.isAxiosError(error)) throw error;
+        const cause = error instanceof Error ? error : undefined;
+        throw new Error(`Failed to update page content: ${cause?.message ?? String(error)}`, { cause });
       }
     }
 
@@ -313,10 +327,11 @@ export class DocmostClient {
       ...(creatorId !== undefined && { creatorId }),
     });
 
-    const items = response.data?.data?.items ?? [];
-    const filteredItems = Array.isArray(items)
-      ? items.map((item: any) => filterSearchResult(item))
-      : [];
+    const items = response.data?.data?.items;
+    if (items !== undefined && !Array.isArray(items)) {
+      throw new Error("Unexpected API response from /search: items is not an array");
+    }
+    const filteredItems = (items ?? []).map((item: any) => filterSearchResult(item));
 
     return {
       items: filteredItems,
@@ -602,12 +617,14 @@ export class DocmostClient {
     await this.ensureAuthenticated();
     const response = await this.client.post("/pages/breadcrumbs", { pageId });
     const items = response.data.data ?? response.data;
-    return Array.isArray(items)
-      ? items.map((breadcrumb: any) => ({
-          id: breadcrumb.id,
-          title: breadcrumb.title,
-        }))
-      : items;
+    if (!Array.isArray(items)) {
+      process.stderr.write(`Warning: getPageBreadcrumbs returned non-array response\n`);
+      return [];
+    }
+    return items.map((breadcrumb: any) => ({
+      id: breadcrumb.id,
+      title: breadcrumb.title,
+    }));
   }
 
   // Comment methods
@@ -713,6 +730,9 @@ export class DocmostClient {
 
   async downloadFile(fileId: string, fileName: string) {
     await this.ensureAuthenticated();
+    if (!/^[\w-]+$/.test(fileId)) {
+      throw new Error(`Invalid file ID: '${fileId}'. Expected alphanumeric/UUID format.`);
+    }
     const sanitizedName = fileName.replace(/[/\\]/g, "_").replace(/\.\./g, "_");
     const response = await this.client.get(`/files/${fileId}/${encodeURIComponent(sanitizedName)}`, {
       responseType: "arraybuffer",

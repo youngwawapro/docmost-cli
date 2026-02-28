@@ -1,4 +1,5 @@
 import { writeFileSync } from "fs";
+import { resolve, relative } from "path";
 import { Command, Option } from "commander";
 import {
   CliError,
@@ -97,8 +98,13 @@ export function register(program: Command) {
         ensureOutputSupported(opts);
         const data = await client.exportSpace(options.spaceId, options.exportFormat, options.includeAttachments);
         if (options.output) {
-          writeFileSync(options.output, Buffer.from(data));
-          printResult({ success: true, message: `Exported to ${options.output}` }, opts);
+          const resolved = resolve(options.output);
+          const rel = relative(process.cwd(), resolved);
+          if (rel.startsWith("..") || resolve(rel) !== resolved) {
+            process.stderr.write(`Warning: writing to path outside CWD: ${resolved}\n`);
+          }
+          writeFileSync(resolved, Buffer.from(data));
+          printResult({ success: true, message: `Exported to ${resolved}` }, opts);
         } else {
           process.stdout.write(Buffer.from(data));
         }
@@ -131,6 +137,9 @@ export function register(program: Command) {
     .action((options: { spaceId: string; role: string; userIds?: string; groupIds?: string }) =>
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts);
+        if (!options.userIds && !options.groupIds) {
+          throw new CliError("VALIDATION_ERROR", "At least one of --user-ids or --group-ids is required.");
+        }
         const userIds = options.userIds
           ? parseCommaSeparatedIds("--user-ids", options.userIds)
           : undefined;

@@ -1,4 +1,5 @@
 import { writeFileSync } from "fs";
+import { resolve, relative } from "path";
 import { Command } from "commander";
 import {
   ensureOutputSupported,
@@ -31,7 +32,12 @@ export function register(program: Command) {
       withClient(program, async (client) => {
         const data = await client.downloadFile(options.fileId, options.fileName);
         if (options.output) {
-          writeFileSync(options.output, Buffer.from(data));
+          const resolved = resolve(options.output);
+          const rel = relative(process.cwd(), resolved);
+          if (rel.startsWith("..") || resolve(rel) !== resolved) {
+            process.stderr.write(`Warning: writing to path outside CWD: ${resolved}\n`);
+          }
+          writeFileSync(resolved, Buffer.from(data));
         } else {
           process.stdout.write(Buffer.from(data));
         }

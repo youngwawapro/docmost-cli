@@ -1,4 +1,5 @@
 import { writeFileSync } from "fs";
+import { resolve, relative } from "path";
 import { Command, Option } from "commander";
 import {
   CliError,
@@ -147,14 +148,13 @@ export function register(program: Command) {
         const pageIds = parseCommaSeparatedIds("--page-ids", options.pageIds);
         const result = await client.deletePages(pageIds);
         const failed = result.filter((r) => !r.success);
+        printResult(result, opts, { allowTable: true });
         if (failed.length > 0) {
-          printResult(result, opts, { allowTable: true });
           throw new CliError(
             "INTERNAL_ERROR",
             `Failed to delete ${failed.length} of ${result.length} pages.`,
           );
         }
-        printResult(result, opts, { allowTable: true });
       }),
     );
 
@@ -295,7 +295,12 @@ export function register(program: Command) {
             options.includeAttachments,
           );
           if (options.output) {
-            writeFileSync(options.output, Buffer.from(data));
+            const resolved = resolve(options.output);
+            const rel = relative(process.cwd(), resolved);
+            if (rel.startsWith("..") || resolve(rel) !== resolved) {
+              process.stderr.write(`Warning: writing to path outside CWD: ${resolved}\n`);
+            }
+            writeFileSync(resolved, Buffer.from(data));
           } else {
             process.stdout.write(Buffer.from(data));
           }

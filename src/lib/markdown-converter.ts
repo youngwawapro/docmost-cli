@@ -139,7 +139,13 @@ export function convertProseMirrorToMarkdown(content: any): string {
         return `📺 [YouTube Video](${youtubeUrl})`;
 
       case "table":
-        return nodeContent.map(processNode).join("\n");
+        const rows = nodeContent.map(processNode);
+        if (rows.length > 0) {
+          const colCount = (nodeContent[0]?.content || []).length || 1;
+          const separator = "|" + " --- |".repeat(colCount);
+          rows.splice(1, 0, separator);
+        }
+        return rows.join("\n");
 
       case "tableRow":
         return "| " + nodeContent.map(processNode).join(" | ") + " |";

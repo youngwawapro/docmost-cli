@@ -7,7 +7,13 @@ import { generateJSON } from "@tiptap/html";
 import { JSDOM } from "jsdom";
 import { tiptapExtensions } from "./tiptap-extensions.js";
 
+const debug = (...args: unknown[]) => {
+  if (process.env.DEBUG) console.error(...args);
+};
+
+let domSetup = false;
 function setupDomEnvironment() {
+  if (domSetup) return;
   const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
   global.window = dom.window as any;
   global.document = dom.window.document;
@@ -15,6 +21,7 @@ function setupDomEnvironment() {
   global.Element = dom.window.Element;
   // @ts-ignore
   global.WebSocket = WebSocket;
+  domSetup = true;
 }
 
 export async function updatePageContentRealtime(
@@ -24,8 +31,8 @@ export async function updatePageContentRealtime(
   baseUrl: string,
 ): Promise<void> {
   setupDomEnvironment();
-  console.error(`Starting realtime update for page ${pageId}`);
-  console.error(`Collab token: ${collabToken ? "present" : "missing"}`);
+  debug(`Starting realtime update for page ${pageId}`);
+  debug(`Collab token: ${collabToken ? "present" : "missing"}`);
 
   // 1. Convert Markdown to HTML
   const html = await marked.parse(markdownContent);
@@ -51,15 +58,23 @@ export async function updatePageContentRealtime(
 
   wsUrl = urlObj.toString();
 
-  console.error(`Connecting to WebSocket: ${wsUrl}`);
+  debug(`Connecting to WebSocket: ${wsUrl}`);
 
   return new Promise<void>((resolve, reject) => {
     let synced = false;
+    let settled = false;
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
 
     // Safety timeout
     const timer = setTimeout(() => {
       if (provider) provider.destroy();
-      reject(new Error("Connection timeout to collaboration server"));
+      fail(new Error("Connection timeout to collaboration server"));
     }, 25000);
 
     const provider = new HocuspocusProvider({
@@ -69,25 +84,23 @@ export async function updatePageContentRealtime(
       token: collabToken,
       // @ts-ignore - Required for Node.js environment
       WebSocketPolyfill: WebSocket as any,
-      onConnect: () => console.error("WS Connect"),
+      onConnect: () => debug("WS Connect"),
       onDisconnect: () => {
-        console.error("WS Disconnect");
+        debug("WS Disconnect");
         if (!synced) {
-          clearTimeout(timer);
           provider.destroy();
-          reject(new Error("WebSocket disconnected before sync completed"));
+          fail(new Error("WebSocket disconnected before sync completed"));
         }
       },
       onClose: () => {
-        console.error("WS Close");
+        debug("WS Close");
         if (!synced) {
-          clearTimeout(timer);
-          reject(new Error("WebSocket closed before sync completed"));
+          fail(new Error("WebSocket closed before sync completed"));
         }
       },
       onSynced: () => {
         synced = true;
-        console.error("Connected and synced!");
+        debug("Connected and synced!");
         try {
           // Prepare the new content in a separate doc
           const tempDoc = TiptapTransformer.toYdoc(
@@ -108,37 +121,37 @@ export async function updatePageContentRealtime(
           const update = Y.encodeStateAsUpdate(tempDoc);
           Y.applyUpdate(ydoc, update);
 
-          console.error(
+          debug(
             "Content replaced. Background persistence in progress (server saves after ~10s debounce)...",
           );
 
           // Clear safety timeout as we are successful
           clearTimeout(timer);
+          settled = true;
 
           // Resolve immediately so the user doesn't have to wait
           resolve();
 
           // Keep connection open in background for save/sync (Docmost has 10s debounce)
           // The node process will keep running this timeout even after the tool returns
-          setTimeout(() => {
+          const bgTimer = setTimeout(() => {
             try {
-              console.error(`Closing background connection for page ${pageId}`);
+              debug(`Closing background connection for page ${pageId}`);
               provider.destroy();
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
-              console.error(`Warning: failed to close WebSocket: ${msg}`);
+              process.stderr.write(`Warning: failed to close WebSocket: ${msg}\n`);
             }
           }, 15000);
+          bgTimer.unref();
         } catch (e) {
-          clearTimeout(timer);
           provider.destroy();
-          reject(e);
+          fail(e instanceof Error ? e : new Error(String(e)));
         }
       },
       onAuthenticationFailed: () => {
-        clearTimeout(timer);
         provider.destroy();
-        reject(new Error("Authentication failed for collaboration connection"));
+        fail(new Error("Authentication failed for collaboration connection"));
       },
     });
   });

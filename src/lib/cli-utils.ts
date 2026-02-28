@@ -289,7 +289,7 @@ export function normalizeError(error: unknown): CliError {
   }
 
   if (error instanceof Error) {
-    return new CliError("INTERNAL_ERROR", error.message);
+    return new CliError("INTERNAL_ERROR", error.message, error.cause ? { cause: error.cause instanceof Error ? error.cause.message : String(error.cause) } : undefined);
   }
 
   return new CliError("INTERNAL_ERROR", "Unknown error");
