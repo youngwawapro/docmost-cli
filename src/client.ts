@@ -358,6 +358,73 @@ export class DocmostClient {
     return filterPage(newPage);
   }
 
+  async getSpaceInfo(spaceId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/spaces/info", { spaceId });
+    return filterSpace(response.data.data ?? response.data);
+  }
+
+  async createSpace(name: string, slug?: string, description?: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/spaces/create", {
+      name, ...(slug && { slug }), ...(description && { description }),
+    });
+    return filterSpace(response.data.data ?? response.data);
+  }
+
+  async updateSpace(spaceId: string, params: Record<string, unknown>) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/spaces/update", { spaceId, ...params });
+    return response.data;
+  }
+
+  async deleteSpace(spaceId: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/spaces/delete", { spaceId });
+    return response.data;
+  }
+
+  async exportSpace(spaceId: string, exportFormat?: string, includeAttachments?: boolean) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/spaces/export", {
+      spaceId,
+      ...(exportFormat && { format: exportFormat }),
+      ...(includeAttachments !== undefined && { includeAttachments }),
+    }, { responseType: "arraybuffer" });
+    return response.data;
+  }
+
+  async getSpaceMembers(spaceId: string) {
+    const members = await this.paginateAll("/spaces/members", { spaceId });
+    return members;
+  }
+
+  async addSpaceMembers(spaceId: string, role: string, userIds?: string[], groupIds?: string[]) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/spaces/members/add", {
+      spaceId, role, userIds: userIds ?? [], groupIds: groupIds ?? [],
+    });
+    return response.data;
+  }
+
+  async removeSpaceMember(spaceId: string, userId?: string, groupId?: string) {
+    await this.ensureAuthenticated();
+    const payload: Record<string, string> = { spaceId };
+    if (userId) payload.userId = userId;
+    if (groupId) payload.groupId = groupId;
+    const response = await this.client.post("/spaces/members/remove", payload);
+    return response.data;
+  }
+
+  async changeSpaceMemberRole(spaceId: string, role: string, userId?: string, groupId?: string) {
+    await this.ensureAuthenticated();
+    const payload: Record<string, string> = { spaceId, role };
+    if (userId) payload.userId = userId;
+    if (groupId) payload.groupId = groupId;
+    const response = await this.client.post("/spaces/members/change-role", payload);
+    return response.data;
+  }
+
   async getWorkspacePublic() {
     const response = await this.client.post("/workspace/public", {});
     return response.data;

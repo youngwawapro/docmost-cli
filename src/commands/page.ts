@@ -11,17 +11,6 @@ import {
 
 export function register(program: Command) {
   program
-    .command("space-list")
-    .description("List all available spaces")
-    .action(() =>
-      withClient(program, async (client, opts) => {
-        ensureOutputSupported(opts, { allowTable: true });
-        const result = await client.getSpaces();
-        printResult(result, opts, { allowTable: true });
-      }),
-    );
-
-  program
     .command("group-list")
     .description("List all available groups")
     .action(() =>
