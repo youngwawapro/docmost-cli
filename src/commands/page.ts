@@ -156,20 +156,6 @@ export function register(program: Command) {
     );
 
   program
-    .command("search")
-    .description("Search pages and content")
-    .requiredOption("--query <q>", "Search query")
-    .option("-s, --space-id <id>", "Filter by space ID")
-    .option("--creator-id <id>", "Filter by creator ID")
-    .action((options: { query: string; spaceId?: string; creatorId?: string }) =>
-      withClient(program, async (client, opts) => {
-        ensureOutputSupported(opts, { allowTable: true });
-        const result = await client.search(options.query, options.spaceId, options.creatorId);
-        printResult(result, opts, { allowTable: true });
-      }),
-    );
-
-  program
     .command("page-history")
     .description("Get page version history")
     .requiredOption("--page-id <id>", "Page ID")

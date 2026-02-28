@@ -15,6 +15,8 @@ import { register as registerSpaceCommands } from "./commands/space.js";
 import { register as registerGroupCommands } from "./commands/group.js";
 import { register as registerCommentCommands } from "./commands/comment.js";
 import { register as registerShareCommands } from "./commands/share.js";
+import { register as registerFileCommands } from "./commands/file.js";
+import { register as registerSearchCommands } from "./commands/search.js";
 
 const pkg = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf-8"),
@@ -65,6 +67,8 @@ async function main() {
   registerGroupCommands(program);
   registerCommentCommands(program);
   registerShareCommands(program);
+  registerFileCommands(program);
+  registerSearchCommands(program);
 
   try {
     await program.parseAsync(process.argv);

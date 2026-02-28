@@ -673,4 +673,38 @@ export class DocmostClient {
     const response = await this.client.post("/shares/delete", { shareId });
     return response.data;
   }
+
+  // File methods
+
+  async uploadFile(filePath: string, pageId: string, attachmentId?: string) {
+    await this.ensureAuthenticated();
+    const form = new FormData();
+    form.append("file", createReadStream(filePath));
+    form.append("pageId", pageId);
+    if (attachmentId) form.append("attachmentId", attachmentId);
+    const response = await axios.post(`${this.baseURL}/files/upload`, form, {
+      headers: { ...form.getHeaders(), Authorization: `Bearer ${this.token}` },
+    });
+    return response.data;
+  }
+
+  async downloadFile(fileId: string, fileName: string) {
+    await this.ensureAuthenticated();
+    const response = await this.client.get(`/files/${fileId}/${fileName}`, {
+      responseType: "arraybuffer",
+    });
+    return response.data;
+  }
+
+  // Search suggest
+
+  async searchSuggest(query: string, spaceId?: string, options?: {
+    includeUsers?: boolean; includeGroups?: boolean; includePages?: boolean; limit?: number;
+  }) {
+    await this.ensureAuthenticated();
+    const response = await this.client.post("/search/suggest", {
+      query, ...(spaceId && { spaceId }), ...options,
+    });
+    return response.data;
+  }
 }
