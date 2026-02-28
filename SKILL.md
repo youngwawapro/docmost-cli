@@ -34,3 +34,14 @@ export DOCMOST_TOKEN=<token>
 export DOCMOST_EMAIL=<email>
 export DOCMOST_PASSWORD=<password>
 ```
+
+## Execution Rules
+
+- If `docmost` is not found, install it: `npm install -g github:dapi/docmost-cli`.
+- Always add `--output json` for agent workflows.
+- Prefer env vars for credentials over CLI flags (`--password` is visible in process lists).
+- Auth precedence: `--token` > `DOCMOST_TOKEN` > `--email/--password` > `DOCMOST_EMAIL/DOCMOST_PASSWORD`.
+- For content input, prefer `--content @file.md` or `--content -` (stdin) over inline strings for multi-line content.
+- `--output text` supported only by: `get-page`, `page-history-detail`. Use when user wants raw markdown.
+- `--output table` supported by: `workspace`, `list-spaces`, `list-groups`, `list-pages`, `get-page`, `search`, `page-history`, `page-history-detail`, `trash`, `delete-pages`, `breadcrumbs`. Use for human-readable displays.
+- Commands not listed above support only `--output json`.
