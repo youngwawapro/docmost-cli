@@ -164,9 +164,11 @@ export function toTableRows(data: unknown): Record<string, unknown>[] {
 
 export function printResult(
   data: unknown,
-  output: OutputFormat,
+  opts: ResolvedOptions,
   options: PrintOptions = {},
 ) {
+  if (opts.quiet) return;
+  const output = opts.format;
   if (output === "json") {
     console.log(JSON.stringify(data, null, 2));
     return;
@@ -209,9 +211,10 @@ export function printResult(
 }
 
 export function ensureOutputSupported(
-  output: OutputFormat,
+  opts: ResolvedOptions,
   options: { allowTable?: boolean; allowText?: boolean } = {},
 ) {
+  const output = opts.format;
   if (output === "table" && !options.allowTable) {
     throw new CliError(
       "VALIDATION_ERROR",

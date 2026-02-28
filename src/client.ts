@@ -224,11 +224,14 @@ export class DocmostClient {
     return this.getPage(newPageId);
   }
 
-  async updatePage(pageId: string, content: string, title?: string) {
+  async updatePage(pageId: string, content: string, title?: string, icon?: string) {
     await this.ensureAuthenticated();
 
-    if (title !== undefined) {
-      await this.client.post("/pages/update", { pageId, title });
+    const metadata: Record<string, string> = { pageId };
+    if (title !== undefined) metadata.title = title;
+    if (icon !== undefined) metadata.icon = icon;
+    if (Object.keys(metadata).length > 1) {
+      await this.client.post("/pages/update", metadata);
     }
 
     let collabToken = "";
@@ -251,11 +254,12 @@ export class DocmostClient {
     };
   }
 
-  async search(query: string, spaceId?: string) {
+  async search(query: string, spaceId?: string, creatorId?: string) {
     await this.ensureAuthenticated();
     const response = await this.client.post("/search", {
       query,
-      spaceId,
+      ...(spaceId && { spaceId }),
+      ...(creatorId && { creatorId }),
     });
 
     const items = response.data?.data?.items ?? [];
