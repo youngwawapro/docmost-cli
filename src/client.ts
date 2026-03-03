@@ -137,8 +137,8 @@ export class DocmostClient {
     }
 
     const finalItems = maxItems < Infinity ? allItems.slice(0, maxItems) : allItems;
-    const resultHasMore = (maxItems < Infinity && allItems.length > maxItems) || hasNextPage;
-    return { items: finalItems, hasMore: resultHasMore };
+    const truncated = finalItems.length < allItems.length;
+    return { items: finalItems, hasMore: truncated || hasNextPage };
   }
 
   async getWorkspace() {
@@ -339,6 +339,7 @@ export class DocmostClient {
 
     return {
       items: filteredItems,
+      hasMore: false,
     };
   }
 
@@ -753,6 +754,6 @@ export class DocmostClient {
     const response = await this.client.post("/search/suggest", {
       query, ...(spaceId !== undefined && { spaceId }), ...options,
     });
-    return response.data;
+    return response.data.data ?? response.data;
   }
 }
