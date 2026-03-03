@@ -15,7 +15,7 @@ export function register(program: Command) {
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true });
         const result = await client.getComments(options.pageId);
-        printResult(result, opts, { allowTable: true });
+        printResult(result.items, opts, { allowTable: true, hasMore: result.hasMore });
       }),
     );
 

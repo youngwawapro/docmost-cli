@@ -16,7 +16,7 @@ export function register(program: Command) {
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true });
         const result = await client.search(options.query, options.spaceId, options.creatorId);
-        printResult(result, opts, { allowTable: true });
+        printResult(result.items, opts, { allowTable: true });
       }),
     );
 

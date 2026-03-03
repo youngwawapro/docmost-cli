@@ -19,7 +19,7 @@ export function register(program: Command) {
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true });
         const result = await client.listPages(options.spaceId);
-        printResult(result, opts, { allowTable: true });
+        printResult(result.items, opts, { allowTable: true, hasMore: result.hasMore });
       }),
     );
 
@@ -31,11 +31,10 @@ export function register(program: Command) {
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true, allowText: true });
         const result = await client.getPage(options.pageId);
-        printResult(result, opts, {
+        printResult(result.data, opts, {
           allowTable: true,
           textExtractor: (data) => {
-            const value = data as { data?: { content?: string } };
-            return value.data?.content;
+            return (data as any)?.content;
           },
         });
       }),
@@ -166,7 +165,7 @@ export function register(program: Command) {
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true });
         const result = await client.getPageHistory(options.pageId, opts.limit, opts.maxItems);
-        printResult(result, opts, { allowTable: true });
+        printResult(result.items, opts, { allowTable: true, hasMore: result.hasMore });
       }),
     );
 
@@ -208,7 +207,7 @@ export function register(program: Command) {
       withClient(program, async (client, opts) => {
         ensureOutputSupported(opts, { allowTable: true });
         const result = await client.getTrash(options.spaceId);
-        printResult(result, opts, { allowTable: true });
+        printResult(result.items, opts, { allowTable: true, hasMore: result.hasMore });
       }),
     );
 
