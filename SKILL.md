@@ -1,10 +1,10 @@
 ---
 name: docmost
 description: >
-  Use when user wants to manage Docmost via docmost-cli: pages, spaces, workspace,
-  members, groups, invites, comments, shares, files, and search.
-  Trigger on requests about Docmost wiki/docs pages, knowledge base updates,
-  page history/trash, page organization, access control, exports/imports,
+  Use when user wants to manage Docmost documentation via docmost-cli: pages, spaces, workspace,
+  members, groups, invites, comments, shares, files, search, and export/import.
+  Trigger on requests about wiki/docs pages, knowledge base, page history/trash,
+  page organization, access control, public sharing, file attachments,
   and workspace administration from terminal.
 ---
 
@@ -52,16 +52,12 @@ docmost workspace-public --format json
   - `page-history-detail` (returns markdown content)
   - `invite-link` (returns raw link)
 - Prefer environment variables for credentials; avoid `--password` in command history/process list.
-- Auth precedence:
-  - `--token` -> `DOCMOST_TOKEN`
-  - `--email/--password` -> `DOCMOST_EMAIL/DOCMOST_PASSWORD`
+- Auth precedence: `--token` > `DOCMOST_TOKEN` > `--email/--password` > `DOCMOST_EMAIL/DOCMOST_PASSWORD`.
 - Use global pagination controls for list/history commands:
   - `--limit <n>` (1..100, default 100)
   - `--max-items <n>` (stop after N total records)
 - For markdown/prose content (`page-update`, `comment-create`, `comment-update`), use:
-  - literal string,
-  - `@path/to/file.md`, or
-  - `-` (stdin)
+  - literal string, `@path/to/file.md`, or `-` (stdin)
 - Binary export/download commands write bytes to stdout unless `--output` is provided:
   - `page-export`, `space-export`, `file-download`
 - Use `--quiet` when only exit status matters.
@@ -73,13 +69,19 @@ docmost workspace-public --format json
 ```bash
 docmost workspace-info --format json
 docmost workspace-public --format json
-
 docmost workspace-update --name "Docs" --description "Team docs" --format json
 docmost workspace-update --enforce-sso true --enforce-mfa true --format json
 
 docmost member-list --format table
 docmost member-role --user-id <userId> --role admin --format json
 docmost member-remove --user-id <userId> --format json
+```
+
+### Users
+
+```bash
+docmost user-me --format json
+docmost user-update --name "Alice" --locale en --page-edit-mode edit --full-page-width true --format json
 ```
 
 ### Spaces
@@ -97,11 +99,7 @@ docmost space-member-add --space-id <spaceId> --role writer --user-ids "u1,u2" -
 docmost space-member-add --space-id <spaceId> --role reader --group-ids "g1,g2" --format json
 docmost space-member-remove --space-id <spaceId> --user-id <userId> --format json
 docmost space-member-role --space-id <spaceId> --group-id <groupId> --role admin --format json
-```
 
-Space export:
-
-```bash
 docmost space-export --space-id <spaceId> --export-format markdown --output ./space.zip --format json
 docmost space-export --space-id <spaceId> --export-format html --include-attachments > ./space.zip
 ```
@@ -120,31 +118,31 @@ docmost page-create --space-id <spaceId> --title "Child" --parent-page-id <paren
 
 docmost page-update --page-id <pageId> --title "Runbook v2" --format json
 docmost page-update --page-id <pageId> --content @./content.md --format json
-echo "# Updated from stdin" | docmost page-update --page-id <pageId> --content - --format json
+echo "# Updated" | docmost page-update --page-id <pageId> --content - --format json
 
 docmost page-move --page-id <pageId> --parent-page-id <parentId> --position a00000 --format json
 docmost page-move --page-id <pageId> --root --format json
+docmost page-move-to-space --page-id <pageId> --space-id <targetSpaceId> --format json
 
 docmost page-delete --page-id <pageId> --format json
 docmost page-delete --page-id <pageId> --permanently-delete --format json
 docmost page-delete-bulk --page-ids "id1,id2,id3" --format json
 
-docmost page-history --page-id <pageId> --limit 50 --max-items 200 --format table
-docmost page-history-detail --history-id <historyId> --format json
-docmost page-history-detail --history-id <historyId> --format text
 docmost page-restore --page-id <pageId> --format json
 docmost page-trash --space-id <spaceId> --format table
-
 docmost page-duplicate --page-id <pageId> --format json
 docmost page-duplicate --page-id <pageId> --space-id <targetSpaceId> --format json
 
 docmost page-breadcrumbs --page-id <pageId> --format table
 docmost page-tree --space-id <spaceId> --format json
 docmost page-tree --page-id <pageId> --format json
-docmost page-move-to-space --page-id <pageId> --space-id <targetSpaceId> --format json
+
+docmost page-history --page-id <pageId> --limit 50 --max-items 200 --format table
+docmost page-history-detail --history-id <historyId> --format json
+docmost page-history-detail --history-id <historyId> --format text
 ```
 
-Page export/import:
+### Page Import/Export
 
 ```bash
 docmost page-export --page-id <pageId> --export-format markdown --output ./page.zip
@@ -178,13 +176,6 @@ docmost invite-create --emails "team@x.com" --role admin --group-ids "g1,g2" --f
 docmost invite-revoke --invitation-id <inviteId> --format json
 docmost invite-resend --invitation-id <inviteId> --format json
 docmost invite-link --invitation-id <inviteId> --format text
-```
-
-### Users
-
-```bash
-docmost user-me --format json
-docmost user-update --name "Alice" --locale en --page-edit-mode edit --full-page-width true --format json
 ```
 
 ### Groups
@@ -257,9 +248,8 @@ For requests like "create/update/move/delete doc page":
    - `page-create` / `page-update` / `page-move` / `page-delete`
 5. Verify:
    - `docmost page-info --page-id <pageId> --format json`
-   - optionally `docmost page-breadcrumbs --page-id <pageId> --format table`
 
-### Search + history investigation
+### Search + History Investigation
 
 For requests like "find where this was documented" or "who changed this":
 
@@ -268,7 +258,7 @@ For requests like "find where this was documented" or "who changed this":
 3. `docmost page-history --page-id <pageId> --format table`
 4. `docmost page-history-detail --history-id <historyId> --format text`
 
-### Access control
+### Access Control
 
 For requests like "add/remove access":
 
@@ -279,16 +269,22 @@ For requests like "add/remove access":
 3. Public page sharing:
    - `share-for-page`, `share-create`, `share-update`, `share-delete`
 
-### Export/import and attachments
+### Export/Import and Attachments
 
-1. Export content:
-   - `page-export` / `space-export`
-2. Import content:
-   - `page-import` / `page-import-zip`
-3. Attach files:
-   - `file-upload`
-4. Download files:
-   - `file-download`
+1. Export content: `page-export` / `space-export`
+2. Import content: `page-import` / `page-import-zip`
+3. Attach files: `file-upload`
+4. Download files: `file-download`
+
+## Request Semantics
+
+- "мой workspace / моё пространство" -> `docmost workspace-info`
+- "spaces / разделы" -> `docmost space-list`
+- "pages / страницы" -> `docmost page-list`
+- "найди / search" -> `docmost search --query "..."`
+- "история изменений" -> `docmost page-history`
+- "удалённые страницы / корзина" -> `docmost page-trash`
+- "доступ / access" -> `member-*` / `space-member-*` / `share-*`
 
 ## Trigger Examples
 
@@ -308,6 +304,8 @@ For requests like "add/remove access":
 - "invite new users to workspace"
 - "change member role to admin"
 - "import Notion zip into Docmost"
+- "покажи дерево страниц"
+- "продублируй страницу"
 
 ### Should not trigger
 
