@@ -41,6 +41,8 @@ function markdownToProseMirrorJson(markdown: string): object {
   }
 }
 
+export type PaginatedResult<T> = { items: T[]; hasMore: boolean };
+
 export type ClientAuthOptions = {
   email?: string;
   password?: string;
@@ -100,7 +102,7 @@ export class DocmostClient {
     basePayload: Record<string, unknown> = {},
     limit: number = 100,
     maxItems: number = Infinity,
-  ): Promise<T[]> {
+  ): Promise<PaginatedResult<T>> {
     await this.ensureAuthenticated();
 
     const clampedLimit = Math.max(1, Math.min(100, limit));
@@ -134,7 +136,9 @@ export class DocmostClient {
       page++;
     }
 
-    return maxItems < Infinity ? allItems.slice(0, maxItems) : allItems;
+    const finalItems = maxItems < Infinity ? allItems.slice(0, maxItems) : allItems;
+    const resultHasMore = (maxItems < Infinity && allItems.length > maxItems) || hasNextPage;
+    return { items: finalItems, hasMore: resultHasMore };
   }
 
   async getWorkspace() {
@@ -147,19 +151,19 @@ export class DocmostClient {
   }
 
   async getSpaces() {
-    const spaces = await this.paginateAll("/spaces", {});
-    return spaces.map((space) => filterSpace(space));
+    const result = await this.paginateAll("/spaces", {});
+    return { items: result.items.map((space) => filterSpace(space)), hasMore: result.hasMore };
   }
 
   async getGroups() {
-    const groups = await this.paginateAll("/groups", {});
-    return groups.map((group) => filterGroup(group));
+    const result = await this.paginateAll("/groups", {});
+    return { items: result.items.map((group) => filterGroup(group)), hasMore: result.hasMore };
   }
 
   async listPages(spaceId?: string) {
     const payload = spaceId ? { spaceId } : {};
-    const pages = await this.paginateAll("/pages/recent", payload);
-    return pages.map((page) => filterPage(page));
+    const result = await this.paginateAll("/pages/recent", payload);
+    return { items: result.items.map((page) => filterPage(page)), hasMore: result.hasMore };
   }
 
   async listSidebarPages(spaceId: string, pageId: string) {
@@ -382,8 +386,8 @@ export class DocmostClient {
   }
 
   async getPageHistory(pageId: string, limit?: number, maxItems?: number) {
-    const items = await this.paginateAll("/pages/history", { pageId }, limit, maxItems);
-    return items.map((entry: any) => filterHistoryEntry(entry));
+    const result = await this.paginateAll("/pages/history", { pageId }, limit, maxItems);
+    return { items: result.items.map((entry: any) => filterHistoryEntry(entry)), hasMore: result.hasMore };
   }
 
   async getPageHistoryDetail(historyId: string) {
@@ -405,8 +409,8 @@ export class DocmostClient {
   }
 
   async getTrash(spaceId: string) {
-    const pages = await this.paginateAll("/pages/trash", { spaceId });
-    return pages.map((page) => filterPage(page));
+    const result = await this.paginateAll("/pages/trash", { spaceId });
+    return { items: result.items.map((page) => filterPage(page)), hasMore: result.hasMore };
   }
 
   async duplicatePage(pageId: string, spaceId?: string) {
@@ -457,8 +461,8 @@ export class DocmostClient {
   }
 
   async getSpaceMembers(spaceId: string) {
-    const members = await this.paginateAll("/spaces/members", { spaceId });
-    return members;
+    const result = await this.paginateAll("/spaces/members", { spaceId });
+    return { items: result.items, hasMore: result.hasMore };
   }
 
   async addSpaceMembers(spaceId: string, role: string, userIds?: string[], groupIds?: string[]) {
@@ -499,8 +503,8 @@ export class DocmostClient {
   }
 
   async getMembers() {
-    const members = await this.paginateAll("/workspace/members", {});
-    return members.map((m: any) => filterMember(m));
+    const result = await this.paginateAll("/workspace/members", {});
+    return { items: result.items.map((m: any) => filterMember(m)), hasMore: result.hasMore };
   }
 
   async removeMember(userId: string) {
@@ -518,8 +522,8 @@ export class DocmostClient {
   // Invite methods
 
   async getInvites() {
-    const invites = await this.paginateAll("/workspace/invites", {});
-    return invites.map((i: any) => filterInvite(i));
+    const result = await this.paginateAll("/workspace/invites", {});
+    return { items: result.items.map((i: any) => filterInvite(i)), hasMore: result.hasMore };
   }
 
   async getInviteInfo(invitationId: string) {
@@ -597,8 +601,8 @@ export class DocmostClient {
   }
 
   async getGroupMembers(groupId: string) {
-    const members = await this.paginateAll("/groups/members", { groupId });
-    return members;
+    const result = await this.paginateAll("/groups/members", { groupId });
+    return { items: result.items, hasMore: result.hasMore };
   }
 
   async addGroupMembers(groupId: string, userIds: string[]) {
@@ -630,8 +634,8 @@ export class DocmostClient {
   // Comment methods
 
   async getComments(pageId: string) {
-    const comments = await this.paginateAll("/comments", { pageId });
-    return comments.map((c: any) => filterComment(c));
+    const result = await this.paginateAll("/comments", { pageId });
+    return { items: result.items.map((c: any) => filterComment(c)), hasMore: result.hasMore };
   }
 
   async getCommentInfo(commentId: string) {
@@ -671,8 +675,8 @@ export class DocmostClient {
   // Share methods
 
   async getShares() {
-    const shares = await this.paginateAll("/shares", {});
-    return shares.map((s: any) => filterShare(s));
+    const result = await this.paginateAll("/shares", {});
+    return { items: result.items.map((s: any) => filterShare(s)), hasMore: result.hasMore };
   }
 
   async getShareInfo(shareId: string) {
