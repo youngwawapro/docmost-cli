@@ -44,7 +44,7 @@ docmost workspace-public --format json
 
 ## Execution Rules
 
-- If `docmost` is not found, install it: `npm install -g github:dapi/docmost-cli`.
+- No pre-flight checks. Run the needed command directly. If `docmost` is not found, install it (`npm install -g github:dapi/docmost-cli`) and retry.
 - All `--format json` output wrapped in envelope: `{ "ok": true, "data": ... }` for success, `{ "ok": false, "error": ... }` for errors.
 - Prefer `--format json` for agent workflows.
 - Use `--format table` when user explicitly wants human-readable tabular output.
