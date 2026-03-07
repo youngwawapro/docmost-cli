@@ -164,6 +164,7 @@ git commit -m "chore: add vitest integration config and npm scripts"
 This is the core test utility. It imports the CLI program, intercepts stdout/stderr, and runs commands programmatically.
 
 ```typescript
+import { readFileSync } from "fs";
 import { Command } from "commander";
 
 // Import all register functions
@@ -245,6 +246,7 @@ export async function runCli(
   const origError = console.error;
   const origTable = console.table;
   const origStdoutWrite = process.stdout.write;
+  const origStderrWrite = process.stderr.write;
 
   console.log = (...a: unknown[]) => stdout.push(a.map(String).join(" "));
   console.error = (...a: unknown[]) => stderr.push(a.map(String).join(" "));
@@ -253,6 +255,10 @@ export async function runCli(
     stdout.push(chunk);
     return true;
   }) as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string) => {
+    stderr.push(chunk);
+    return true;
+  }) as typeof process.stderr.write;
 
   let exitCode = 0;
 
@@ -277,6 +283,7 @@ export async function runCli(
     console.error = origError;
     console.table = origTable;
     process.stdout.write = origStdoutWrite;
+    process.stderr.write = origStderrWrite;
     for (const [k, v] of Object.entries(savedEnv)) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
@@ -300,11 +307,21 @@ export function testUrl(): string {
   return process.env.DOCMOST_TEST_URL || "http://localhost:4010";
 }
 
+/** Read token written by global-setup (runs in a separate process) */
+function readTestToken(): string {
+  try {
+    const { TOKEN_FILE } = require("./global-setup.js") as { TOKEN_FILE: string };
+    return readFileSync(TOKEN_FILE, "utf-8").trim();
+  } catch {
+    return process.env.DOCMOST_TEST_TOKEN || "";
+  }
+}
+
 /** Get test credentials env vars for runCli */
 export function testEnv(): Record<string, string> {
   return {
     DOCMOST_API_URL: testUrl(),
-    DOCMOST_TOKEN: process.env.DOCMOST_TEST_TOKEN || "",
+    DOCMOST_TOKEN: readTestToken(),
     DOCMOST_EMAIL: process.env.DOCMOST_TEST_EMAIL || "",
     DOCMOST_PASSWORD: process.env.DOCMOST_TEST_PASSWORD || "",
   };
@@ -330,6 +347,9 @@ Docmost requires initial setup (create first user + workspace) before API calls 
 **Step 1: Write global-setup.ts**
 
 ```typescript
+import { writeFileSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import axios from "axios";
 
 const BASE_URL = process.env.DOCMOST_TEST_URL || "http://localhost:4010";
@@ -337,8 +357,13 @@ const EMAIL = process.env.DOCMOST_TEST_EMAIL || "test@example.com";
 const PASSWORD = process.env.DOCMOST_TEST_PASSWORD || "TestPassword123!";
 const WORKSPACE_NAME = "CLI Integration Tests";
 
+/** Shared file path for token — globalSetup runs in a separate process,
+ *  so process.env changes are NOT visible in test workers.
+ *  We write the token to a file and read it in testEnv(). */
+export const TOKEN_FILE = join(tmpdir(), "docmost-test-token");
+
 export async function setup() {
-  // Check if workspace already exists
+  // Check if Docmost is reachable
   try {
     const health = await axios.get(`${BASE_URL}/api/health`);
     if (health.status !== 200) {
@@ -362,7 +387,6 @@ export async function setup() {
     console.log("[global-setup] Created workspace and admin user");
   } catch (err: unknown) {
     if (axios.isAxiosError(err) && err.response?.status === 400) {
-      // Already set up — that's fine
       console.log("[global-setup] Workspace already exists, skipping setup");
     } else {
       throw err;
@@ -380,9 +404,13 @@ export async function setup() {
     throw new Error("Failed to obtain auth token from login response");
   }
 
-  // Store token for tests to use
-  process.env.DOCMOST_TEST_TOKEN = token;
-  console.log("[global-setup] Obtained auth token");
+  // Write token to shared file so test workers can read it
+  writeFileSync(TOKEN_FILE, token, "utf-8");
+  console.log("[global-setup] Obtained auth token, wrote to", TOKEN_FILE);
+}
+
+export async function teardown() {
+  try { rmSync(TOKEN_FILE); } catch {}
 }
 ```
 
@@ -439,6 +467,17 @@ describe("workspace commands", () => {
     expect(Array.isArray(envelope.data)).toBe(true);
     expect(envelope.meta).toHaveProperty("count");
   });
+
+  it("workspace-info with invalid token returns AUTH_ERROR", async () => {
+    const result = await runCli(["workspace-info"], {
+      DOCMOST_API_URL: env.DOCMOST_API_URL,
+      DOCMOST_TOKEN: "invalid-token-12345",
+    });
+
+    const envelope = JSON.parse(result.stderr || result.stdout);
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error.code).toBe("AUTH_ERROR");
+  });
 });
 ```
 
@@ -491,6 +530,7 @@ describe("space commands", () => {
   });
 
   it("space-list includes created space", async () => {
+    expect(spaceId).toBeDefined(); // guard: depends on space-create
     const result = await runCli(["space-list"], env);
     expect(result.exitCode).toBe(0);
 
@@ -501,6 +541,7 @@ describe("space commands", () => {
   });
 
   it("space-info returns space details", async () => {
+    expect(spaceId).toBeDefined(); // guard: depends on space-create
     const result = await runCli(
       ["space-info", "--space-id", spaceId],
       env,
@@ -514,6 +555,7 @@ describe("space commands", () => {
   });
 
   it("space-update changes name", async () => {
+    expect(spaceId).toBeDefined(); // guard: depends on space-create
     const newName = `${spaceName}-updated`;
     const result = await runCli(
       ["space-update", "--space-id", spaceId, "--name", newName],
@@ -944,7 +986,7 @@ describe("invite commands", () => {
 
   it("invite-create sends an invite", async () => {
     const result = await runCli(
-      ["invite-create", "--email", inviteEmail, "--role", "member"],
+      ["invite-create", "--emails", inviteEmail, "--role", "member"],
       env,
     );
     expect(result.exitCode).toBe(0);
@@ -968,7 +1010,7 @@ describe("invite commands", () => {
 
   it("invite-info returns invite details", async () => {
     const result = await runCli(
-      ["invite-info", "--invite-id", inviteId],
+      ["invite-info", "--invitation-id", inviteId],
       env,
     );
     expect(result.exitCode).toBe(0);
@@ -980,7 +1022,7 @@ describe("invite commands", () => {
 
   it("invite-revoke revokes the invite", async () => {
     const result = await runCli(
-      ["invite-revoke", "--invite-id", inviteId],
+      ["invite-revoke", "--invitation-id", inviteId],
       env,
     );
     expect(result.exitCode).toBe(0);
@@ -1128,8 +1170,13 @@ describe("search commands", () => {
       env,
     );
 
-    // Wait briefly for indexing
-    await new Promise((r) => setTimeout(r, 2000));
+    // Poll until search index catches up (max 15s)
+    for (let i = 0; i < 15; i++) {
+      const probe = await runCli(["search", "--query", "UniqueSearchTerm42"], env);
+      const probeEnv = parseEnvelope(probe);
+      if (probeEnv.ok && Array.isArray(probeEnv.data) && probeEnv.data.length > 0) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
   });
 
   it("search returns results for known term", async () => {
@@ -1141,6 +1188,7 @@ describe("search commands", () => {
 
     const envelope = parseEnvelope(result);
     expect(envelope.ok).toBe(true);
+    expect(Array.isArray(envelope.data)).toBe(true);
   });
 
   it("search-suggest returns suggestions", async () => {
