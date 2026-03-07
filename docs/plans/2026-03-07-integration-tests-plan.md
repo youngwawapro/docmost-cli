@@ -165,7 +165,14 @@ This is the core test utility. It imports the CLI program, intercepts stdout/std
 
 ```typescript
 import { readFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { Command } from "commander";
+import {
+  normalizeError,
+  printError,
+  isCommanderHelpExit,
+} from "../../../lib/cli-utils.js";
 
 // Import all register functions
 import { register as registerPageCommands } from "../../../commands/page.js";
@@ -266,16 +273,13 @@ export async function runCli(
     const program = buildProgram();
     await program.parseAsync(["node", "docmost", ...args]);
   } catch (error: unknown) {
-    // Commander exit override throws on --help/--version
-    if (
-      error &&
-      typeof error === "object" &&
-      "exitCode" in error &&
-      typeof (error as any).exitCode === "number"
-    ) {
-      exitCode = (error as any).exitCode;
+    if (isCommanderHelpExit(error)) {
+      exitCode = 0;
     } else {
-      exitCode = 1;
+      // Mirror src/index.ts error handling: normalize + print envelope
+      const normalized = normalizeError(error);
+      printError(normalized, "json");
+      exitCode = normalized.exitCode;
     }
   } finally {
     // Restore
@@ -297,9 +301,10 @@ export async function runCli(
   };
 }
 
-/** Parse stdout as JSON envelope */
+/** Parse JSON envelope from stdout (success) or stderr (error) */
 export function parseEnvelope(result: CliResult) {
-  return JSON.parse(result.stdout);
+  const source = result.stdout.trim() || result.stderr.trim();
+  return JSON.parse(source);
 }
 
 /** Get test server URL from env */
@@ -307,10 +312,12 @@ export function testUrl(): string {
   return process.env.DOCMOST_TEST_URL || "http://localhost:4010";
 }
 
+/** Must match TOKEN_FILE in global-setup.ts (duplicated to avoid ESM import issues) */
+const TOKEN_FILE = join(tmpdir(), "docmost-test-token");
+
 /** Read token written by global-setup (runs in a separate process) */
 function readTestToken(): string {
   try {
-    const { TOKEN_FILE } = require("./global-setup.js") as { TOKEN_FILE: string };
     return readFileSync(TOKEN_FILE, "utf-8").trim();
   } catch {
     return process.env.DOCMOST_TEST_TOKEN || "";
@@ -474,7 +481,8 @@ describe("workspace commands", () => {
       DOCMOST_TOKEN: "invalid-token-12345",
     });
 
-    const envelope = JSON.parse(result.stderr || result.stdout);
+    expect(result.exitCode).not.toBe(0);
+    const envelope = parseEnvelope(result);
     expect(envelope.ok).toBe(false);
     expect(envelope.error.code).toBe("AUTH_ERROR");
   });
@@ -1189,6 +1197,7 @@ describe("search commands", () => {
     const envelope = parseEnvelope(result);
     expect(envelope.ok).toBe(true);
     expect(Array.isArray(envelope.data)).toBe(true);
+    expect(envelope.data.length).toBeGreaterThan(0);
   });
 
   it("search-suggest returns suggestions", async () => {
