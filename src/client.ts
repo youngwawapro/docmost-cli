@@ -108,32 +108,57 @@ export class DocmostClient {
     const clampedLimit = Math.max(1, Math.min(100, limit));
 
     let page = 1;
+    let cursor: string | null = null;
     let allItems: T[] = [];
     let hasNextPage = true;
+    const seenRequests = new Set<string>();
 
     while (hasNextPage && allItems.length < maxItems) {
-      const response = await this.client.post(endpoint, {
+      const usingCursor: boolean = cursor !== null;
+      const requestKey = usingCursor ? `cursor:${cursor}` : `page:${page}`;
+      if (seenRequests.has(requestKey)) {
+        throw new Error(`Pagination loop detected for ${endpoint}: repeated ${requestKey}`);
+      }
+      seenRequests.add(requestKey);
+
+      const requestPayload: Record<string, unknown> = {
         ...basePayload,
         limit: clampedLimit,
-        page,
-      });
+        ...(usingCursor ? { cursor } : { page }),
+      };
+      const response: { data: any } = await this.client.post(endpoint, requestPayload);
 
-      const data = response.data;
-      const inner = data.data ?? data;
-      const items = inner.items;
+      const data: any = response.data;
+      const inner: any = data.data ?? data;
+      const items: T[] = inner.items;
       if (!Array.isArray(items)) {
         throw new Error(
           `Unexpected API response from ${endpoint}: missing items array`,
         );
       }
-      const meta = inner.meta;
+      const meta: {
+        hasNextPage?: boolean;
+        nextCursor?: unknown;
+        prevCursor?: unknown;
+      } | undefined = inner.meta;
       if (!meta && items.length === clampedLimit) {
         process.stderr.write(`Warning: API response from ${endpoint} missing pagination meta; results may be incomplete.\n`);
       }
 
       allItems = allItems.concat(items);
-      hasNextPage = meta?.hasNextPage ?? false;
-      page++;
+
+      const nextCursor = typeof meta?.nextCursor === "string" && meta.nextCursor.length > 0
+        ? meta.nextCursor
+        : null;
+      const usesCursorPagination = usingCursor || nextCursor !== null || typeof meta?.prevCursor === "string";
+
+      if (usesCursorPagination) {
+        hasNextPage = Boolean(meta?.hasNextPage && nextCursor);
+        cursor = hasNextPage ? nextCursor : null;
+      } else {
+        hasNextPage = meta?.hasNextPage ?? false;
+        page++;
+      }
     }
 
     const finalItems = maxItems < Infinity ? allItems.slice(0, maxItems) : allItems;
