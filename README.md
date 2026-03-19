@@ -1,8 +1,8 @@
 [![CI](https://github.com/dapi/docmost-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/dapi/docmost-cli/actions/workflows/ci.yml)
 
-# Docmost MCP Server
+# Docmost CLI + MCP Server
 
-A Model Context Protocol (MCP) server for [Docmost](https://docmost.com/), enabling AI agents to search, create, modify, and organize documentation pages and spaces.
+A Docmost CLI plus a standard stdio Model Context Protocol (MCP) server for [Docmost](https://docmost.com/), enabling AI agents to search, create, modify, and organize documentation pages and spaces.
 
 ## Features
 
@@ -24,6 +24,8 @@ A Model Context Protocol (MCP) server for [Docmost](https://docmost.com/), enabl
 
 ### Technical Details
 
+- **Standard MCP over stdio**: Ships a dedicated `docmost-mcp` executable for Codex, Claude Desktop, and other MCP clients.
+- **Automatic tool generation**: Every supported CLI command is exposed as an MCP tool with JSON schema derived from Commander options.
 - **Automatic Markdown Conversion**: Page content is automatically converted from Docmost's internal ProseMirror/TipTap JSON format to clean Markdown for easy agent consumption. Supports all Docmost extensions including callouts, task lists, math blocks, embeds, and more.
 - **Smart Import API**: Uses Docmost's import API to ensure clean Markdown-to-ProseMirror conversion when creating pages.
 - **Child Preservation**: The `update_page` tool creates a new page ID but effectively simulates an in-place update by reparenting existing child pages to the new version.
@@ -49,24 +51,38 @@ npm run build
 
 ## Configuration
 
-This server requires the following environment variables:
+The CLI and MCP server use the same environment variables:
 
 - `DOCMOST_API_URL`: The full URL to your Docmost API (e.g., `https://docs.example.com/api`).
 - `DOCMOST_EMAIL`: The email address for authentication.
 - `DOCMOST_PASSWORD`: The password for authentication.
 
-## Usage with Claude Desktop / MCP Client
+## Usage with Codex / MCP Clients
 
-Add the following to your MCP configuration (e.g. `claude_desktop_config.json`):
+### Codex
 
-### Using npx (recommended)
+Add the server directly with `codex mcp add`:
+
+```bash
+codex mcp add docmost \
+  --env DOCMOST_API_URL=http://localhost:3000/api \
+  --env DOCMOST_EMAIL=test@docmost.com \
+  --env DOCMOST_PASSWORD=test \
+  -- npx -y -p @dapi/docmost-cli docmost-mcp
+```
+
+### Generic MCP config
+
+If your MCP client uses a JSON config file, point it at the dedicated `docmost-mcp` executable:
+
+#### Using `npx`
 
 ```json
 {
   "mcpServers": {
     "docmost": {
       "command": "npx",
-      "args": ["github:dapi/docmost-mcp"],
+      "args": ["-y", "-p", "@dapi/docmost-cli", "docmost-mcp"],
       "env": {
         "DOCMOST_API_URL": "http://localhost:3000/api",
         "DOCMOST_EMAIL": "test@docmost.com",
@@ -77,14 +93,14 @@ Add the following to your MCP configuration (e.g. `claude_desktop_config.json`):
 }
 ```
 
-### Using local build
+#### Using local build
 
 ```json
 {
   "mcpServers": {
     "docmost": {
       "command": "node",
-      "args": ["./build/index.js"],
+      "args": ["./build/mcp.js"],
       "env": {
         "DOCMOST_API_URL": "http://localhost:3000/api",
         "DOCMOST_EMAIL": "test@docmost.com",
@@ -103,6 +119,9 @@ npm run watch
 
 # Build
 npm run build
+
+# Start stdio MCP server
+npm run start:mcp
 ```
 
 ## License

@@ -1,10 +1,11 @@
 {
   "name": "@dapi/docmost-cli",
   "version": "2.2.0",
-  "description": "A CLI for Docmost, allowing automation and documentation management from the terminal.",
+  "description": "A Docmost CLI and standard MCP server for documentation automation.",
   "main": "build/index.js",
   "bin": {
-    "docmost": "build/index.js"
+    "docmost": "build/index.js",
+    "docmost-mcp": "build/mcp.js"
   },
   "files": [
     "build"
@@ -13,6 +14,7 @@
     "build": "tsc",
     "prepublishOnly": "tsc",
     "start": "node build/index.js",
+    "start:mcp": "node build/mcp.js",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "vitest run && vitest run --config vitest.integration.config.ts",
@@ -32,6 +34,7 @@
   "dependencies": {
     "@hocuspocus/provider": "^3.4.4",
     "@hocuspocus/transformer": "^3.4.4",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@tiptap/core": "^3.18.0",
     "@tiptap/extension-image": "^3.18.0",
     "@tiptap/extension-link": "^3.18.0",
@@ -47,7 +50,8 @@
     "jsdom": "^27.4.0",
     "marked": "^17.0.1",
     "ws": "^8.19.0",
-    "yjs": "^13.6.29"
+    "yjs": "^13.6.29",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/form-data": "^2.5.0",
