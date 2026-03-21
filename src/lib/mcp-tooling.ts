@@ -51,6 +51,13 @@ export type CommandExecutionResult = {
   outputPath?: string;
 };
 
+export type McpAuthContext = {
+  apiUrl?: string;
+  token?: string;
+  email?: string;
+  password?: string;
+};
+
 let executionQueue = Promise.resolve();
 
 function toBuffer(chunk: string | Uint8Array, encoding?: BufferEncoding): Buffer {
@@ -276,8 +283,20 @@ export function listMcpTools(): McpToolDefinition[] {
     });
 }
 
-function buildArgv(tool: McpToolDefinition, args: Record<string, unknown>) {
-  const argv = ["node", "docmost", "--format", "json", tool.commandName];
+function buildArgv(tool: McpToolDefinition, args: Record<string, unknown>, auth?: McpAuthContext) {
+  const argv = ["node", "docmost", "--format", "json"];
+
+  if (auth?.apiUrl) {
+    argv.push("--api-url", auth.apiUrl);
+  }
+
+  if (auth?.token) {
+    argv.push("--token", auth.token);
+  } else if (auth?.email && auth?.password) {
+    argv.push("--email", auth.email, "--password", auth.password);
+  }
+
+  argv.push(tool.commandName);
 
   for (const option of tool.options) {
     argv.push(...option.serialize(args[option.name]));
@@ -286,9 +305,13 @@ function buildArgv(tool: McpToolDefinition, args: Record<string, unknown>) {
   return argv;
 }
 
-async function executeToolInternal(tool: McpToolDefinition, args: Record<string, unknown>): Promise<CommandExecutionResult> {
+async function executeToolInternal(
+  tool: McpToolDefinition,
+  args: Record<string, unknown>,
+  auth?: McpAuthContext,
+): Promise<CommandExecutionResult> {
   const program = createProgram();
-  const argv = buildArgv(tool, args);
+  const argv = buildArgv(tool, args, auth);
 
   const { stdout, stderr } = await withCapturedStdio(async () => {
     try {
@@ -340,8 +363,37 @@ function isSuccessResult(parsed: unknown, stderr: string) {
   return stderr.trim().length === 0;
 }
 
-export function executeTool(tool: McpToolDefinition, args: Record<string, unknown>) {
-  const run = executionQueue.then(() => executeToolInternal(tool, args));
+export function parseDocmostBearer(
+  bearerToken: string | undefined,
+  defaultApiUrl = process.env.DOCMOST_API_URL,
+): McpAuthContext {
+  const trimmed = bearerToken?.trim();
+
+  if (!defaultApiUrl) {
+    throw new Error("DOCMOST_API_URL is not set.");
+  }
+
+  if (!trimmed) {
+    return { apiUrl: defaultApiUrl };
+  }
+
+  const separatorIndex = trimmed.indexOf(":");
+  if (separatorIndex === -1) {
+    return {
+      apiUrl: defaultApiUrl,
+      token: trimmed,
+    };
+  }
+
+  return {
+    apiUrl: defaultApiUrl,
+    email: trimmed.slice(0, separatorIndex),
+    password: trimmed.slice(separatorIndex + 1),
+  };
+}
+
+export function executeTool(tool: McpToolDefinition, args: Record<string, unknown>, auth?: McpAuthContext) {
+  const run = executionQueue.then(() => executeToolInternal(tool, args, auth));
   executionQueue = run.then(() => undefined, () => undefined);
   return run;
 }

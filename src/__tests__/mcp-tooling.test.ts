@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { executeTool, listMcpTools } from "../lib/mcp-tooling.js";
+import { executeTool, listMcpTools, parseDocmostBearer } from "../lib/mcp-tooling.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -55,5 +55,20 @@ describe("MCP tooling", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("VALIDATION_ERROR");
     expect(parsed.error.message).toContain("API URL is required");
+  });
+
+  it("parses bearer tokens as either docmost API tokens or email/password pairs", () => {
+    const tokenAuth = parseDocmostBearer("token-123", "https://docs.example.com/api");
+    expect(tokenAuth).toEqual({
+      apiUrl: "https://docs.example.com/api",
+      token: "token-123",
+    });
+
+    const passwordAuth = parseDocmostBearer("alice@example.com:secret", "https://docs.example.com/api");
+    expect(passwordAuth).toEqual({
+      apiUrl: "https://docs.example.com/api",
+      email: "alice@example.com",
+      password: "secret",
+    });
   });
 });

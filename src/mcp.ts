@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { pathToFileURL } from "url";
 import { getVersion } from "./program.js";
-import { executeTool, listMcpTools, type CommandExecutionResult, type McpToolDefinition } from "./lib/mcp-tooling.js";
+import {
+  executeTool,
+  listMcpTools,
+  parseDocmostBearer,
+  type CommandExecutionResult,
+  type McpToolDefinition,
+} from "./lib/mcp-tooling.js";
 
 function formatExecutionResult(tool: McpToolDefinition, result: CommandExecutionResult) {
   if (result.parsed !== undefined) {
@@ -97,8 +105,13 @@ export function createMcpServer() {
         inputSchema: tool.inputSchema,
         annotations: tool.annotations,
       },
-      async (args) => {
-        const result = await executeTool(tool, args as Record<string, unknown>);
+      async (args, extra) => {
+        const authHeader = getAuthorizationHeader(extra?.requestInfo?.headers);
+        if (!authHeader) {
+          throw new Error("Authorization header is required for Docmost tool calls.");
+        }
+        const auth = parseDocmostBearer(extractBearerToken(authHeader));
+        const result = await executeTool(tool, args as Record<string, unknown>, auth);
 
         return {
           content: [
@@ -116,7 +129,99 @@ export function createMcpServer() {
   return server;
 }
 
+function getAuthorizationHeader(headers: Record<string, string | string[] | undefined> | undefined) {
+  if (!headers) {
+    return undefined;
+  }
+
+  const value = headers.authorization ?? headers.Authorization;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function extractBearerToken(headerValue: string | undefined) {
+  if (!headerValue) {
+    return undefined;
+  }
+
+  const trimmed = headerValue.trim();
+  const prefix = "Bearer ";
+  return trimmed.toLowerCase().startsWith(prefix.toLowerCase())
+    ? trimmed.slice(prefix.length).trim()
+    : trimmed;
+}
+
+function createHttpApp() {
+  const app = createMcpExpressApp({ host: "0.0.0.0" });
+
+  app.get("/healthz", (_req: unknown, res: any) => {
+    res.json({ ok: true, service: "docmost-mcp", version: getVersion() });
+  });
+
+  app.post("/mcp", async (req: any, res: any) => {
+    const server = createMcpServer();
+
+    try {
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+      });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+      res.on("close", () => {
+        void transport.close();
+        void server.close();
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          jsonrpc: "2.0",
+          error: {
+            code: -32603,
+            message,
+          },
+          id: null,
+        });
+      }
+    }
+  });
+
+  app.get("/mcp", (_req: unknown, res: any) => {
+    res.status(405).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    });
+  });
+
+  app.delete("/mcp", (_req: unknown, res: any) => {
+    res.status(405).json({
+      jsonrpc: "2.0",
+      error: {
+        code: -32000,
+        message: "Method not allowed.",
+      },
+      id: null,
+    });
+  });
+
+  return app;
+}
+
 async function main() {
+  const mode = process.argv[2] || "stdio";
+
+  if (mode === "http") {
+    const port = Number(process.env.PORT || "8000");
+    const app = createHttpApp();
+    app.listen(port, "0.0.0.0", () => {
+      console.error(`Docmost MCP HTTP server listening on port ${port}`);
+    });
+    return;
+  }
+
   const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

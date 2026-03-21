@@ -15,6 +15,7 @@
     "prepublishOnly": "tsc",
     "start": "node build/index.js",
     "start:mcp": "node build/mcp.js",
+    "start:mcp:http": "node build/mcp.js http",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:all": "vitest run && vitest run --config vitest.integration.config.ts",

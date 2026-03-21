@@ -2,7 +2,7 @@
 
 # Docmost CLI + MCP Server
 
-A Docmost CLI plus a standard stdio Model Context Protocol (MCP) server for [Docmost](https://docmost.com/), enabling AI agents to search, create, modify, and organize documentation pages and spaces.
+A Docmost CLI plus standard stdio and HTTP Model Context Protocol (MCP) servers for [Docmost](https://docmost.com/), enabling AI agents to search, create, modify, and organize documentation pages and spaces.
 
 ## Features
 
@@ -56,6 +56,11 @@ The CLI and MCP server use the same environment variables:
 - `DOCMOST_API_URL`: The full URL to your Docmost API (e.g., `https://docs.example.com/api`).
 - `DOCMOST_EMAIL`: The email address for authentication.
 - `DOCMOST_PASSWORD`: The password for authentication.
+
+For remote HTTP MCP mode, set `DOCMOST_API_URL` on the server and send user credentials in the bearer token:
+
+- `Authorization: Bearer <docmost-api-token>`
+- `Authorization: Bearer <email>:<password>`
 
 ## Usage with Codex / MCP Clients
 
@@ -122,6 +127,9 @@ npm run build
 
 # Start stdio MCP server
 npm run start:mcp
+
+# Start HTTP MCP server
+npm run start:mcp:http
 ```
 
 ## License
