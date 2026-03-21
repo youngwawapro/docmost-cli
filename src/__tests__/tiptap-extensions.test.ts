@@ -51,6 +51,25 @@ describe("tiptapExtensions with generateJSON", () => {
     expect(linkMark.attrs.href).toBe("https://example.com");
   });
 
+  it("parses page mention span", () => {
+    const doc = parse(
+      '<p><span data-type="mention" data-id="mention-1" data-entity-type="page" data-entity-id="page-1" data-label="通信合同文档" data-slug-id="slug-1">通信合同文档</span></p>',
+    );
+    const mention = doc.content[0].content[0];
+    expect(mention).toEqual({
+      type: "mention",
+      attrs: {
+        id: "mention-1",
+        label: "通信合同文档",
+        entityType: "page",
+        entityId: "page-1",
+        slugId: "slug-1",
+        creatorId: null,
+        anchorId: null,
+      },
+    });
+  });
+
   it("parses image", () => {
     const doc = parse('<p><img src="https://example.com/img.png" alt="photo"></p>');
     const img = doc.content[0].content.find((n: any) => n.type === "image");

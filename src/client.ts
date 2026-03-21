@@ -18,9 +18,10 @@ import {
 import { convertProseMirrorToMarkdown } from "./lib/markdown-converter.js";
 import { updatePageContentRealtime } from "./lib/collaboration.js";
 import { getCollabToken, performLogin } from "./lib/auth-utils.js";
-import { marked } from "marked";
-import { generateJSON } from "@tiptap/html";
-import { tiptapExtensions } from "./lib/tiptap-extensions.js";
+import {
+  markdownToProseMirrorJson,
+  ResolvedPageMention,
+} from "./lib/page-mentions.js";
 
 function ensureFileReadable(filePath: string): void {
   try {
@@ -31,17 +32,17 @@ function ensureFileReadable(filePath: string): void {
   }
 }
 
-function markdownToProseMirrorJson(markdown: string): object {
-  try {
-    const html = marked.parse(markdown, { async: false }) as string;
-    return generateJSON(html, tiptapExtensions);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Failed to convert markdown to ProseMirror JSON: ${msg}`, { cause: err });
-  }
-}
-
 export type PaginatedResult<T> = { items: T[]; hasMore: boolean };
+
+type SearchSuggestionPage = {
+  id: string;
+  title: string;
+  slugId: string;
+};
+
+function normalizeMentionLabel(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
 
 export type ClientAuthOptions = {
   email?: string;
@@ -332,7 +333,8 @@ export class DocmostClient {
         throw new Error(`Failed to get collaboration token: ${cause?.message ?? String(error)}`, { cause });
       }
       try {
-        await updatePageContentRealtime(pageId, content, collabToken, this.baseURL);
+        const prosemirrorJson = await this.buildPageContentJson(pageId, content);
+        await updatePageContentRealtime(pageId, prosemirrorJson, collabToken, this.baseURL);
       } catch (error: unknown) {
         if (axios.isAxiosError(error)) throw error;
         const cause = error instanceof Error ? error : undefined;
@@ -346,6 +348,95 @@ export class DocmostClient {
       message: "Page updated successfully.",
       pageId,
     };
+  }
+
+  private async buildPageContentJson(pageId: string, content: string): Promise<object> {
+    const pageResponse = await this.client.post("/pages/info", { pageId });
+    const page = pageResponse.data?.data ?? pageResponse.data;
+    const spaceId = typeof page?.spaceId === "string" ? page.spaceId : undefined;
+    const currentUser = await this.getCurrentUser();
+    const mentionCache = new Map<string, ResolvedPageMention | null>();
+
+    try {
+      return await markdownToProseMirrorJson(content, {
+        creatorId: currentUser.id,
+        resolvePageMention: async (label) => {
+          const cacheKey = normalizeMentionLabel(label);
+          if (mentionCache.has(cacheKey)) {
+            return mentionCache.get(cacheKey) ?? null;
+          }
+
+          const resolved = await this.resolvePageMention(label, spaceId);
+          mentionCache.set(cacheKey, resolved);
+          return resolved;
+        },
+      });
+    } catch (error: unknown) {
+      const cause = error instanceof Error ? error : undefined;
+      throw new Error(
+        `Failed to convert markdown to ProseMirror JSON: ${cause?.message ?? String(error)}`,
+        { cause },
+      );
+    }
+  }
+
+  private async resolvePageMention(
+    label: string,
+    preferredSpaceId?: string,
+  ): Promise<ResolvedPageMention | null> {
+    const normalizedLabel = normalizeMentionLabel(label);
+
+    const selectSingleMatch = (
+      pages: SearchSuggestionPage[],
+      scope: string,
+    ): ResolvedPageMention | null => {
+      const matches = pages.filter(
+        (page) => normalizeMentionLabel(page.title || "") === normalizedLabel,
+      );
+
+      if (matches.length === 1) {
+        const match = matches[0];
+        return { id: match.id, title: match.title, slugId: match.slugId };
+      }
+
+      if (matches.length > 1) {
+        process.stderr.write(
+          `Warning: mention @${label} is ambiguous in ${scope}; keeping plain text.\n`,
+        );
+      }
+
+      return null;
+    };
+
+    if (preferredSpaceId) {
+      const scoped = await this.searchSuggest(label, preferredSpaceId, {
+        includePages: true,
+        includeGroups: false,
+        includeUsers: false,
+        limit: 20,
+      });
+      const scopedPages = Array.isArray(scoped?.pages)
+        ? (scoped.pages as SearchSuggestionPage[])
+        : [];
+      const scopedMatch = selectSingleMatch(
+        scopedPages,
+        `space ${preferredSpaceId}`,
+      );
+      if (scopedMatch) {
+        return scopedMatch;
+      }
+    }
+
+    const workspaceWide = await this.searchSuggest(label, undefined, {
+      includePages: true,
+      includeGroups: false,
+      includeUsers: false,
+      limit: 20,
+    });
+    const workspacePages = Array.isArray(workspaceWide?.pages)
+      ? (workspaceWide.pages as SearchSuggestionPage[])
+      : [];
+    return selectSingleMatch(workspacePages, "workspace");
   }
 
   async search(query: string, spaceId?: string, creatorId?: string) {
@@ -672,7 +763,7 @@ export class DocmostClient {
 
   async createComment(pageId: string, content: string, selection?: string, parentCommentId?: string) {
     await this.ensureAuthenticated();
-    const prosemirrorJson = markdownToProseMirrorJson(content);
+    const prosemirrorJson = await markdownToProseMirrorJson(content);
     const response = await this.client.post("/comments/create", {
       pageId,
       content: JSON.stringify(prosemirrorJson),
@@ -684,7 +775,7 @@ export class DocmostClient {
 
   async updateComment(commentId: string, content: string) {
     await this.ensureAuthenticated();
-    const prosemirrorJson = markdownToProseMirrorJson(content);
+    const prosemirrorJson = await markdownToProseMirrorJson(content);
     const response = await this.client.post("/comments/update", {
       commentId,
       content: JSON.stringify(prosemirrorJson),

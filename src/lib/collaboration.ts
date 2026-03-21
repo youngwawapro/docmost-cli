@@ -2,8 +2,6 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import { TiptapTransformer } from "@hocuspocus/transformer";
 import * as Y from "yjs";
 import WebSocket from "ws";
-import { marked } from "marked";
-import { generateJSON } from "@tiptap/html";
 import { JSDOM } from "jsdom";
 import { tiptapExtensions } from "./tiptap-extensions.js";
 
@@ -26,7 +24,7 @@ function setupDomEnvironment() {
 
 export async function updatePageContentRealtime(
   pageId: string,
-  markdownContent: string,
+  tiptapJson: object,
   collabToken: string,
   baseUrl: string,
 ): Promise<void> {
@@ -34,13 +32,7 @@ export async function updatePageContentRealtime(
   debug(`Starting realtime update for page ${pageId}`);
   debug(`Collab token: ${collabToken ? "present" : "missing"}`);
 
-  // 1. Convert Markdown to HTML
-  const html = await marked.parse(markdownContent);
-
-  // 2. Convert HTML to ProseMirror JSON
-  const tiptapJson = generateJSON(html, tiptapExtensions);
-
-  // 3. Setup Hocuspocus Provider
+  // 1. Setup Hocuspocus Provider
   const ydoc = new Y.Doc();
 
   // Construct WebSocket URL
