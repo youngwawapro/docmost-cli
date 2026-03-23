@@ -1,6 +1,6 @@
 {
-  "name": "@dapi/docmost-cli",
-  "version": "2.2.0",
+  "name": "fantsec-docmost-cli",
+  "version": "2.2.2",
   "description": "A Docmost CLI and standard MCP server for documentation automation.",
   "main": "build/index.js",
   "bin": {

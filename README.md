@@ -37,13 +37,13 @@ A Docmost CLI plus standard stdio and HTTP Model Context Protocol (MCP) servers 
 ### From npm (recommended)
 
 ```bash
-npm install -g @dapi/docmost-cli
+npm install -g fantsec-docmost-cli
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/dapi/docmost-cli.git
+git clone https://github.com/youngwawapro/docmost-cli.git
 cd docmost-cli
 npm install
 npm run build
@@ -73,7 +73,7 @@ codex mcp add docmost \
   --env DOCMOST_API_URL=http://localhost:3000/api \
   --env DOCMOST_EMAIL=test@docmost.com \
   --env DOCMOST_PASSWORD=test \
-  -- npx -y -p @dapi/docmost-cli docmost-mcp
+  -- npx -y -p fantsec-docmost-cli docmost-mcp
 ```
 
 ### Generic MCP config
@@ -87,7 +87,7 @@ If your MCP client uses a JSON config file, point it at the dedicated `docmost-m
   "mcpServers": {
     "docmost": {
       "command": "npx",
-      "args": ["-y", "-p", "@dapi/docmost-cli", "docmost-mcp"],
+      "args": ["-y", "-p", "fantsec-docmost-cli", "docmost-mcp"],
       "env": {
         "DOCMOST_API_URL": "http://localhost:3000/api",
         "DOCMOST_EMAIL": "test@docmost.com",

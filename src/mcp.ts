@@ -3,6 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { realpathSync } from "fs";
 import { pathToFileURL } from "url";
 import { getVersion } from "./program.js";
 import {
@@ -106,11 +107,7 @@ export function createMcpServer() {
         annotations: tool.annotations,
       },
       async (args, extra) => {
-        const authHeader = getAuthorizationHeader(extra?.requestInfo?.headers);
-        if (!authHeader) {
-          throw new Error("Authorization header is required for Docmost tool calls.");
-        }
-        const auth = parseDocmostBearer(extractBearerToken(authHeader));
+        const auth = resolveToolAuthContext(extra?.requestInfo?.headers);
         const result = await executeTool(tool, args as Record<string, unknown>, auth);
 
         return {
@@ -127,6 +124,23 @@ export function createMcpServer() {
   }
 
   return server;
+}
+
+export function resolveToolAuthContext(
+  headers: Record<string, string | string[] | undefined> | undefined,
+) {
+  const authHeader = getAuthorizationHeader(headers);
+  if (authHeader) {
+    return parseDocmostBearer(extractBearerToken(authHeader));
+  }
+
+  // Local stdio MCP calls do not provide request headers. In that case we
+  // intentionally fall back to DOCMOST_* env vars so local client configs work.
+  if (!headers) {
+    return undefined;
+  }
+
+  throw new Error("Authorization header is required for remote Docmost tool calls.");
 }
 
 function getAuthorizationHeader(headers: Record<string, string | string[] | undefined> | undefined) {
@@ -227,7 +241,20 @@ async function main() {
   await server.connect(transport);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isDirectExecution() {
+  const entrypoint = process.argv[1];
+  if (!entrypoint) {
+    return false;
+  }
+
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entrypoint)).href;
+  } catch {
+    return import.meta.url === pathToFileURL(entrypoint).href;
+  }
+}
+
+if (isDirectExecution()) {
   main().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Docmost MCP server error: ${message}`);
