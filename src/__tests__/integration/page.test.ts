@@ -6,6 +6,7 @@ const env = testEnv();
 describe("page commands", () => {
   let spaceId: string;
   let pageId: string;
+  let pageUrl: string;
 
   beforeAll(async () => {
     const result = await runCli(
@@ -51,6 +52,24 @@ describe("page commands", () => {
     const envelope = parseEnvelope(result);
     expect(envelope.ok).toBe(true);
     expect(envelope.data.id).toBe(pageId);
+    expect(envelope.data.slugId).toBeTruthy();
+    expect(envelope.data.spaceSlug).toBeTruthy();
+    expect(envelope.data.url).toContain(`/s/${envelope.data.spaceSlug}/p/`);
+    pageUrl = envelope.data.url;
+  });
+
+  it("page-resolve-url resolves a web URL back to the same page", async () => {
+    const result = await runCli(
+      ["page-resolve-url", "--url", pageUrl],
+      env,
+    );
+    expect(result.exitCode).toBe(0);
+
+    const envelope = parseEnvelope(result);
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.id).toBe(pageId);
+    expect(envelope.data.url).toBe(pageUrl);
+    expect(envelope.data.resolvedFromUrl).toBe(pageUrl);
   });
 
   it("page-breadcrumbs returns path", async () => {

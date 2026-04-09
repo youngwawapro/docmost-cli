@@ -40,12 +40,14 @@ export function filterGroup(group: any) {
   };
 }
 
-export function filterPage(page: any, content?: string, subpages?: any[]) {
+export function filterPage(page: any, content?: string, subpages?: any[], extra?: Record<string, unknown>) {
   return {
     id: page.id,
+    slugId: page.slugId,
     title: page.title,
     parentPageId: page.parentPageId,
     spaceId: page.spaceId,
+    spaceSlug: page.space?.slug,
     isLocked: page.isLocked,
     createdAt: page.createdAt,
     updatedAt: page.updatedAt,
@@ -57,6 +59,7 @@ export function filterPage(page: any, content?: string, subpages?: any[]) {
       subpages.length > 0 && {
         subpages: subpages.map((p) => ({ id: p.id, title: p.title })),
       }),
+    ...(extra ?? {}),
   };
 }
 

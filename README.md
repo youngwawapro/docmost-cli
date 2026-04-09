@@ -132,6 +132,50 @@ npm run start:mcp
 npm run start:mcp:http
 ```
 
+## Release
+
+This repository now supports CI-driven release for both distribution modes:
+
+- `npm` package publish for `fantsec-docmost-cli`
+- HTTP MCP container image publish to `ghcr.io/<owner>/<repo>`
+
+### Release trigger
+
+Push a version tag:
+
+```bash
+git tag v2.2.3
+git push origin v2.2.3
+```
+
+### What CI does
+
+- runs build + unit tests
+- starts the local Docmost test stack and runs integration tests
+- publishes the npm package
+- builds and pushes the HTTP MCP Docker image
+
+### Required GitHub secrets
+
+- `NPM_TOKEN`: npm publish token for `fantsec-docmost-cli`
+
+### HTTP MCP image
+
+The release workflow publishes:
+
+```bash
+ghcr.io/youngwawapro/docmost-cli:<tag>
+ghcr.io/youngwawapro/docmost-cli:latest
+```
+
+Example run:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e DOCMOST_API_URL=https://docs.example.com/api \
+  ghcr.io/youngwawapro/docmost-cli:latest
+```
+
 ## License
 
 MIT

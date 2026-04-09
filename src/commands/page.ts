@@ -41,6 +41,23 @@ export function register(program: Command) {
     );
 
   program
+    .command("page-resolve-url")
+    .description("Resolve a web page URL to its underlying Docmost page")
+    .requiredOption("--url <url>", "Docmost web page URL")
+    .action((options: { url: string }) =>
+      withClient(program, async (client, opts) => {
+        ensureOutputSupported(opts, { allowTable: true, allowText: true });
+        const result = await client.resolvePageByUrl(options.url);
+        printResult(result.data, opts, {
+          allowTable: true,
+          textExtractor: (data) => {
+            return (data as any)?.content;
+          },
+        });
+      }),
+    );
+
+  program
     .command("page-create")
     .description("Create a new page")
     .requiredOption("--space-id <id>", "Space ID")

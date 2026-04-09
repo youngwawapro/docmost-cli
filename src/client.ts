@@ -18,6 +18,7 @@ import {
 import { convertProseMirrorToMarkdown } from "./lib/markdown-converter.js";
 import { updatePageContentRealtime } from "./lib/collaboration.js";
 import { getCollabToken, performLogin } from "./lib/auth-utils.js";
+import { buildPageUrl, extractSlugIdFromPageUrl } from "./lib/page-url.js";
 import {
   markdownToProseMirrorJson,
   ResolvedPageMention,
@@ -208,7 +209,7 @@ export class DocmostClient {
 
   async getPage(pageId: string) {
     await this.ensureAuthenticated();
-    const response = await this.client.post("/pages/info", { pageId });
+    const response = await this.client.post("/pages/info", { pageId, includeSpace: true });
     const resultData = response.data.data;
 
     let content = resultData.content
@@ -239,8 +240,28 @@ export class DocmostClient {
     }
 
     return {
-      data: filterPage(resultData, content, subpages),
+      data: filterPage(resultData, content, subpages, {
+        url: resultData.slugId
+          ? buildPageUrl(this.baseURL, resultData.space?.slug, resultData.slugId, resultData.title)
+          : undefined,
+      }),
       success: response.data.success,
+    };
+  }
+
+  async resolvePageByUrl(pageUrl: string) {
+    const slugId = extractSlugIdFromPageUrl(pageUrl);
+    if (!slugId) {
+      throw new Error(`Could not extract page slugId from URL: ${pageUrl}`);
+    }
+
+    const result = await this.getPage(slugId);
+    return {
+      data: {
+        ...result.data,
+        resolvedFromUrl: pageUrl,
+      },
+      success: result.success,
     };
   }
 
