@@ -2,6 +2,7 @@ import { Command, Option } from "commander";
 import { format } from "util";
 import { z, type ZodRawShape, type ZodTypeAny } from "zod";
 import {
+  CliError,
   getSafeOutput,
   isCommanderHelpExit,
   normalizeError,
@@ -11,6 +12,7 @@ import { createProgram } from "../program.js";
 
 const EXCLUDED_COMMANDS = new Set(["commands"]);
 const FILE_OUTPUT_COMMANDS = new Set(["file-download", "page-export", "space-export"]);
+const LOCAL_PATH_OPTION_NAMES = new Set(["content", "file", "output"]);
 
 type OutputBuffer = {
   stdout: Buffer[];
@@ -211,6 +213,22 @@ function createOptionSchema(option: Option, commandName: string): McpToolOption 
   };
 }
 
+function supportsMcpCwd(options: McpToolOption[]) {
+  return options.some((option) => LOCAL_PATH_OPTION_NAMES.has(option.name));
+}
+
+function createMcpCwdOption(): McpToolOption {
+  const description = "Resolve relative local paths against this directory in MCP mode.";
+  return {
+    name: "cwd",
+    long: "--cwd",
+    description,
+    required: false,
+    schema: z.string().describe(description).optional(),
+    serialize: () => [],
+  };
+}
+
 function getAnnotations(commandName: string) {
   const readOnlyPrefixes = [
     "page-list",
@@ -262,8 +280,11 @@ export function listMcpTools(): McpToolDefinition[] {
     .map((command) => {
       const commandName = command.name();
       const options = command.options.map((option) => createOptionSchema(option, commandName));
+      const mcpOptions = supportsMcpCwd(options)
+        ? [...options, createMcpCwdOption()]
+        : options;
       const inputSchema = Object.fromEntries(
-        options.map((option) => [option.name, option.schema]),
+        mcpOptions.map((option) => [option.name, option.schema]),
       ) as ZodRawShape;
       const toolName = commandName.replace(/-/g, "_");
       const baseDescription = command.description();
@@ -276,7 +297,7 @@ export function listMcpTools(): McpToolDefinition[] {
         toolName,
         description,
         inputSchema,
-        options,
+        options: mcpOptions,
         annotations: getAnnotations(commandName),
         requiresOutputPath: FILE_OUTPUT_COMMANDS.has(commandName),
       };
@@ -312,17 +333,30 @@ async function executeToolInternal(
 ): Promise<CommandExecutionResult> {
   const program = createProgram();
   const argv = buildArgv(tool, args, auth);
+  const requestedCwd = typeof args.cwd === "string" ? args.cwd : undefined;
 
   const { stdout, stderr } = await withCapturedStdio(async () => {
+    const previousCwd = process.cwd();
     try {
+      if (requestedCwd) {
+        process.chdir(requestedCwd);
+      }
+
       await program.parseAsync(argv);
     } catch (error: unknown) {
       if (isCommanderHelpExit(error)) {
         return;
       }
 
-      const normalized = normalizeError(error);
+      const normalizedError = requestedCwd && isInvalidCwdError(error)
+        ? new CliError("VALIDATION_ERROR", `Cannot use cwd '${requestedCwd}': ${error.message}`)
+        : error;
+      const normalized = normalizeError(normalizedError);
       printError(normalized, getSafeOutput(program));
+    } finally {
+      if (requestedCwd) {
+        process.chdir(previousCwd);
+      }
     }
   });
 
@@ -340,6 +374,12 @@ async function executeToolInternal(
     parsed,
     outputPath: typeof args.output === "string" ? args.output : undefined,
   };
+}
+
+function isInvalidCwdError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error
+    && typeof (error as NodeJS.ErrnoException).code === "string"
+    && ["ENOENT", "ENOTDIR", "EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code!);
 }
 
 function safeJsonParse(value: string) {

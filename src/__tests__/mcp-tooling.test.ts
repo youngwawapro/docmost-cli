@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { afterEach, describe, expect, it } from "vitest";
 import { executeTool, listMcpTools, parseDocmostBearer } from "../lib/mcp-tooling.js";
 
@@ -37,6 +40,20 @@ describe("MCP tooling", () => {
     expect((shareCreate?.inputSchema.includeSubpages as any).safeParse("true").success).toBe(false);
   });
 
+  it("adds cwd only for MCP tools that resolve local filesystem paths", () => {
+    const tools = listMcpTools();
+    const pageUpdate = tools.find((tool) => tool.commandName === "page-update");
+    const fileUpload = tools.find((tool) => tool.commandName === "file-upload");
+    const workspaceInfo = tools.find((tool) => tool.commandName === "workspace-info");
+
+    expect(pageUpdate).toBeDefined();
+    expect(fileUpload).toBeDefined();
+    expect(workspaceInfo).toBeDefined();
+    expect((pageUpdate?.inputSchema.cwd as any).safeParse("/tmp").success).toBe(true);
+    expect((fileUpload?.inputSchema.cwd as any).safeParse("/tmp").success).toBe(true);
+    expect(workspaceInfo?.inputSchema.cwd).toBeUndefined();
+  });
+
   it("returns CLI validation errors as MCP-friendly results", async () => {
     delete process.env.DOCMOST_API_URL;
     delete process.env.DOCMOST_TOKEN;
@@ -55,6 +72,41 @@ describe("MCP tooling", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("VALIDATION_ERROR");
     expect(parsed.error.message).toContain("API URL is required");
+  });
+
+  it("uses cwd to resolve @file content in local stdio MCP mode", async () => {
+    process.env.DOCMOST_API_URL = "http://127.0.0.1:1/api";
+    process.env.DOCMOST_TOKEN = "token-123";
+
+    const tempDir = mkdtempSync(join(tmpdir(), "docmost-mcp-"));
+    const contentPath = join(tempDir, "note.md");
+    writeFileSync(contentPath, "# hello from cwd test\n", "utf-8");
+
+    try {
+      const tools = listMcpTools();
+      const commentUpdate = tools.find((tool) => tool.commandName === "comment-update");
+
+      expect(commentUpdate).toBeDefined();
+
+      const withoutCwd = await executeTool(commentUpdate!, {
+        commentId: "comment-1",
+        content: "@note.md",
+      });
+      const withoutCwdParsed = withoutCwd.parsed as { error: { message: string } };
+      expect(withoutCwd.ok).toBe(false);
+      expect(withoutCwdParsed.error.message).toContain("Cannot read file 'note.md'");
+
+      const withCwd = await executeTool(commentUpdate!, {
+        commentId: "comment-1",
+        content: "@note.md",
+        cwd: tempDir,
+      });
+      const withCwdParsed = withCwd.parsed as { error: { message: string } };
+      expect(withCwd.ok).toBe(false);
+      expect(withCwdParsed.error.message).not.toContain("Cannot read file 'note.md'");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("parses bearer tokens as either docmost API tokens or email/password pairs", () => {
