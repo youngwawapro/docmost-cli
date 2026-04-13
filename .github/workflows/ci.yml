@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
@@ -52,3 +56,68 @@ jobs:
       - name: Stop services
         if: always()
         run: docker compose -f docker-compose.test.yml down -v
+
+  release-npm:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [unit-tests, integration-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure release still targets the current main tip
+        run: |
+          git fetch origin main
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "Main moved since this workflow started; skipping release."
+            echo "skip_release=true" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: env.skip_release != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+        if: env.skip_release != 'true'
+
+      - name: Bump patch version
+        if: env.skip_release != 'true'
+        id: version
+        run: |
+          npm version patch --no-git-tag-version
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create release commit and tag
+        if: env.skip_release != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+
+      - name: Push release commit and tag
+        if: env.skip_release != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git push origin HEAD:main
+          git push origin "v${VERSION}"
+
+      - run: npm run build
+        if: env.skip_release != 'true'
+
+      - name: Publish package to npm
+        if: env.skip_release != 'true'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
